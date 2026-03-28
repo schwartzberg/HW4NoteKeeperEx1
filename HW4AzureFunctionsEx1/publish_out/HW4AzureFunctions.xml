@@ -1,0 +1,120 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>HW4AzureFunctionsEx1</name>
+    </assembly>
+    <members>
+        <member name="T:HW4AzureFunctionsEx1.AttachmentZipFunction">
+            <summary>
+            Azure Function triggered by messages in the <c>attachment-zip-requests</c> queue.
+            Delegates all business logic to <see cref="T:HW4AzureFunctionsEx1.AttachmentZipProcessor"/>.
+            </summary>
+        </member>
+        <member name="T:HW4AzureFunctionsEx1.AttachmentZipHttpTestFunction">
+            <summary>
+            HTTP-triggered test function that calls the same <see cref="T:HW4AzureFunctionsEx1.AttachmentZipProcessor"/>
+            used by the queue-triggered function. Useful for debugging in the Azure Portal
+            (Code + Test → Test/Run) without needing a queue message.
+            </summary>
+        </member>
+        <member name="T:HW4AzureFunctionsEx1.AttachmentZipProcessor">
+            <summary>
+            Contains the business logic for creating zip archives from note attachments.
+            Called by both the queue-triggered function and the HTTP test function.
+            </summary>
+        </member>
+        <member name="M:HW4AzureFunctionsEx1.AttachmentZipProcessor.ProcessAsync(HW4AzureFunctionsEx1.Models.ZipRequest)">
+            <summary>
+            Processes a zip request: downloads all blobs from the note's attachment container,
+            creates a zip archive, and uploads it to the {noteId}-zip container.
+            </summary>
+        </member>
+        <member name="T:HW4AzureFunctionsEx1.BlobStorageHelper">
+            <summary>
+            Provides a <see cref="T:Azure.Storage.Blobs.BlobServiceClient"/> scoped to the storage account,
+            authenticated with <see cref="T:Azure.Identity.DefaultAzureCredential"/> (managed identity in Azure,
+            developer credentials locally).
+            </summary>
+        </member>
+        <member name="M:HW4AzureFunctionsEx1.BlobStorageHelper.#ctor(Microsoft.Extensions.Configuration.IConfiguration,Microsoft.Extensions.Logging.ILogger{HW4AzureFunctionsEx1.BlobStorageHelper})">
+            <summary>
+            Initialises the helper by reading <c>StorageBlobServiceUri</c> from configuration
+            and creating a <see cref="T:Azure.Storage.Blobs.BlobServiceClient"/> with <see cref="T:Azure.Identity.DefaultAzureCredential"/>.
+            </summary>
+        </member>
+        <member name="P:HW4AzureFunctionsEx1.BlobStorageHelper.Client">
+            <summary>Gets the underlying <see cref="T:Azure.Storage.Blobs.BlobServiceClient"/>.</summary>
+        </member>
+        <member name="T:HW4AzureFunctionsEx1.Models.ZipRequest">
+            <summary>
+            Represents the JSON payload of a message in the <c>attachment-zip-requests</c> queue.
+            </summary>
+        </member>
+        <member name="P:HW4AzureFunctionsEx1.Models.ZipRequest.NoteId">
+            <summary>The ID (GUID string) of the note whose attachments should be zipped.</summary>
+        </member>
+        <member name="P:HW4AzureFunctionsEx1.Models.ZipRequest.ZipFileId">
+            <summary>The target blob name for the resulting zip file (e.g. "guid.zip").</summary>
+        </member>
+        <member name="M:HW4AzureFunctionsEx1.WorkerExtensionStartupCodeExecutor.Configure(Microsoft.Azure.Functions.Worker.IFunctionsWorkerApplicationBuilder)">
+            <summary>
+            Configures the worker to register extension startup services.
+            </summary>
+            <param name="applicationBuilder">The <see cref="T:Microsoft.Azure.Functions.Worker.IFunctionsWorkerApplicationBuilder"/> to configure.</param>
+        </member>
+        <member name="M:HW4AzureFunctionsEx1.DirectFunctionExecutor.ExecuteAsync(Microsoft.Azure.Functions.Worker.FunctionContext)">
+            <inheritdoc/>
+        </member>
+        <member name="T:HW4AzureFunctionsEx1.FunctionExecutorHostBuilderExtensions">
+            <summary>
+            Extension methods to enable registration of the custom <see cref="T:Microsoft.Azure.Functions.Worker.Invocation.IFunctionExecutor"/> implementation generated for the current worker.
+            </summary>
+        </member>
+        <member name="M:HW4AzureFunctionsEx1.FunctionExecutorHostBuilderExtensions.ConfigureGeneratedFunctionExecutor(Microsoft.Extensions.Hosting.IHostBuilder)">
+            <summary>
+             Configures an optimized function executor to the invocation pipeline.
+            </summary>
+        </member>
+        <member name="T:HW4AzureFunctionsEx1.FunctionExecutorAutoStartup">
+            <summary>
+            Auto startup class to register the custom <see cref="T:Microsoft.Azure.Functions.Worker.Invocation.IFunctionExecutor"/> implementation generated for the current worker.
+            </summary>
+        </member>
+        <member name="M:HW4AzureFunctionsEx1.FunctionExecutorAutoStartup.Configure(Microsoft.Extensions.Hosting.IHostBuilder)">
+            <summary>
+            Configures the <see cref="T:Microsoft.Extensions.Hosting.IHostBuilder"/> to use the custom <see cref="T:Microsoft.Azure.Functions.Worker.Invocation.IFunctionExecutor"/> implementation generated for the current worker.
+            </summary>
+            <param name="hostBuilder">The <see cref="T:Microsoft.Extensions.Hosting.IHostBuilder"/> instance to use for service registration.</param>
+        </member>
+        <member name="T:HW4AzureFunctionsEx1.GeneratedFunctionMetadataProvider">
+            <summary>
+            Custom <see cref="T:Microsoft.Azure.Functions.Worker.Core.FunctionMetadata.IFunctionMetadataProvider"/> implementation that returns function metadata definitions for the current worker.
+            </summary>
+        </member>
+        <member name="M:HW4AzureFunctionsEx1.GeneratedFunctionMetadataProvider.GetFunctionMetadataAsync(System.String)">
+            <inheritdoc/>
+        </member>
+        <member name="T:HW4AzureFunctionsEx1.WorkerHostBuilderFunctionMetadataProviderExtension">
+            <summary>
+            Extension methods to enable registration of the custom <see cref="T:Microsoft.Azure.Functions.Worker.Core.FunctionMetadata.IFunctionMetadataProvider"/> implementation generated for the current worker.
+            </summary>
+        </member>
+        <member name="M:HW4AzureFunctionsEx1.WorkerHostBuilderFunctionMetadataProviderExtension.ConfigureGeneratedFunctionMetadataProvider(Microsoft.Extensions.Hosting.IHostBuilder)">
+            <summary>
+             Adds the GeneratedFunctionMetadataProvider to the service collection.
+             During initialization, the worker will return generated function metadata instead of relying on the Azure Functions host for function indexing.
+            </summary>
+        </member>
+        <member name="T:HW4AzureFunctionsEx1.FunctionMetadataProviderAutoStartup">
+            <summary>
+            Auto startup class to register the custom <see cref="T:Microsoft.Azure.Functions.Worker.Core.FunctionMetadata.IFunctionMetadataProvider"/> implementation generated for the current worker.
+            </summary>
+        </member>
+        <member name="M:HW4AzureFunctionsEx1.FunctionMetadataProviderAutoStartup.Configure(Microsoft.Extensions.Hosting.IHostBuilder)">
+            <summary>
+            Configures the <see cref="T:Microsoft.Extensions.Hosting.IHostBuilder"/> to use the custom <see cref="T:Microsoft.Azure.Functions.Worker.Core.FunctionMetadata.IFunctionMetadataProvider"/> implementation generated for the current worker.
+            </summary>
+            <param name="hostBuilder">The <see cref="T:Microsoft.Extensions.Hosting.IHostBuilder"/> instance to use for service registration.</param>
+        </member>
+    </members>
+</doc>

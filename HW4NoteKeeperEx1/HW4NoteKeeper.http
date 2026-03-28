@@ -1,0 +1,6 @@
+@HW4NoteKeeper_HostAddress = https://localhost:5267
+
+GET {{HW4NoteKeeper_HostAddress}}/notes/
+Accept: application/json
+
+###
