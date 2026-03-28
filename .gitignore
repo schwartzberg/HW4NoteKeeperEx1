@@ -365,3 +365,7 @@ publish_output/
 
 # Azure Functions local settings (contains secrets)
 local.settings.json
+
+# Publish output folders
+publish_out/
+publish/
