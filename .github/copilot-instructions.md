@@ -543,6 +543,19 @@ if (protectedContainers.Contains(container.Name) || container.Name.StartsWith("$
 
 **Solution**: Always check `OnModelCreating()` in the DbContext for `.ToTable()` calls before writing raw SQL. Use the mapped table name, not the DbSet property name.
 
+### Issue: Moq throws "IsOverridable" / "non-overridable member" when mocking concrete service class methods
+**Root Cause**: Moq can only mock `virtual` methods (or interface methods). Concrete class methods without `virtual` cannot be intercepted by Moq.
+
+**Solution**: Mark the methods you need to mock as `virtual`:
+```csharp
+// In your service class:
+public virtual async Task EnqueueZipRequestAsync(string noteId, string zipFileId) { ... }
+public virtual async Task<int> GetBlobCountAsync(string noteId) { ... }
+```
+Or, preferably, extract an interface (`IAzureStorageService`) and register/inject it — this is better design and allows Moq to mock without `virtual`.
+
+**In this project**: `AzureStorageService` methods (`GetBlobCountAsync`, `EnqueueZipRequestAsync`, `EnqueueLegacyZipRequestAsync`) and `JobsTableService.InsertQueuedJobAsync` are marked `virtual` for Moq compatibility.
+
 ## Running Tests
 
 ```bash

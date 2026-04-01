@@ -945,3 +945,61 @@ The DELETE method now:
 | OS | Linux |
 | SKU | Basic B2 |
 | Region | Sweden Central |
+
+
+---
+
+## 4.3 Queue Routing: Two POST Methods, Two Queues
+
+### Background
+The Ex1 solution coexists with the original HW4NoteKeeper solution. Both share the same Azure storage account (st4hw3) but use **separate queues** and separate Function App triggers so they do not interfere with each other.
+
+### Old POST — RequestZipCreation (NoteKeeperZipAttachmentController)
+| Property | Value |
+|----------|-------|
+| Controller | NoteKeeperZipAttachmentController |
+| Route | POST notes/{noteId}/attachmentzipfiles |
+| Target queue | ttachment-zip-requests |
+| Jobs table row | **Not inserted** — legacy flow has no job tracking |
+| Triggered function | AttachmentZipFunction (listens on ttachment-zip-requests) |
+
+The old POST was **deliberately kept without Jobs table interaction**. It enqueues to the original ttachment-zip-requests queue and returns a 202 Accepted with a Location header pointing to the zip blob URL. This keeps backward compatibility with the original HW4 assignment.
+
+The method AzureStorageService.EnqueueLegacyZipRequestAsync was added (alongside EnqueueZipRequestAsync) so the two queue names are independently configurable via StorageOperationalSettings:
+
+| Setting property | Default value | Queue |
+|-----------------|---------------|-------|
+| ZipRequestsQueueName | ttachment-zip-requests-ex1 | Ex1 function |
+| ZipRequestsLegacyQueueName | ttachment-zip-requests | Legacy function |
+
+### New POST — RequestZipCreationEx1 (NoteKeeperZipAttachmentControllerEx1)
+| Property | Value |
+|----------|-------|
+| Controller | NoteKeeperZipAttachmentControllerEx1 |
+| Route | POST notes/{noteId}/attachmentzipfilesex1 |
+| Target queue | ttachment-zip-requests-ex1 |
+| Jobs table row | **Inserted** as Status=Queued before enqueuing |
+| Triggered function | AttachmentZipFunctionEx1 (listens on ttachment-zip-requests-ex1) |
+
+The new POST first inserts a Queued row into the Jobs table (so status can be tracked immediately), then enqueues to ttachment-zip-requests-ex1. It returns 202 Accepted with a Location header pointing to the job-status endpoint: 
+otes/{noteId}/attachmentzipfiles/jobs/{zipFileId}.
+
+### NoteKeeperZipAttachmentControllerEx1 — All Endpoints
+| Method | Route | Description | Returns |
+|--------|-------|-------------|---------|
+| POST | 
+otes/{noteId}/attachmentzipfilesex1 | Create zip job (Ex1) — inserts Jobs row, enqueues to ex1 queue | 202 / 204 (no attachments) / 404 |
+| GET | 
+otes/{noteId}/attachmentzipfiles/jobs/{zipFileId} | Get specific job status | 200 / 404 |
+| GET | 
+otes/{noteId}/attachmentzipfiles/jobs | Get all job statuses for a note | 200 / 404 |
+
+### Why the Route Differs
+The base route of NoteKeeperZipAttachmentControllerEx1 is 
+otes/{noteId}/attachmentzipfiles/jobs.
+The new POST uses an absolute route override ([HttpPost("/notes/{noteId}/attachmentzipfilesex1")]) with x1 appended to the path to avoid conflicts with the old POST at 
+otes/{noteId}/attachmentzipfiles and with the GET collection at 
+otes/{noteId}/attachmentzipfiles/jobs.
+
+### Moq / Unit Testing Note
+AzureStorageService methods GetBlobCountAsync, EnqueueZipRequestAsync, EnqueueLegacyZipRequestAsync and JobsTableService.InsertQueuedJobAsync are marked irtual so Moq can mock them in unit tests without requiring interface extraction. 11 unit tests in NoteKeeperZipAttachmentControllerTests cover both controllers and all queue-routing scenarios.

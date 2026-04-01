@@ -97,12 +97,9 @@ namespace HW4NoteKeeperEx1.Controllers
                 // Generate the target zip file name
                 string zipFileId = $"{Guid.NewGuid()}.zip";
 
-                // §2.3.1 – Insert a Queued row into the Jobs table BEFORE enqueuing
-                // so the Azure Function always finds the row when it starts processing
-                await _jobsTableService.InsertQueuedJobAsync(noteId, zipFileId);
-
-                // Enqueue the zip request
-                await _storageService.EnqueueZipRequestAsync(noteId, zipFileId);
+                // Enqueue to the legacy queue (attachment-zip-requests).
+                // The original AttachmentZipFunction handles this path with no job-status tracking.
+                await _storageService.EnqueueLegacyZipRequestAsync(noteId, zipFileId);
 
                 _telemetryClient.TrackEvent("ZipRequested",
                     new Dictionary<string, string> { { "noteId", noteId }, { "zipFileId", zipFileId } });

@@ -42,9 +42,18 @@ namespace HW4AzureFunctionsEx1
 
             if (!string.IsNullOrEmpty(tableUri))
             {
-                var serviceClient = new TableServiceClient(new Uri(tableUri), new DefaultAzureCredential());
+                // Use the same managed identity client ID that AzureWebJobsStorage uses,
+                // so DefaultAzureCredential picks the user-assigned identity (id-dbadmin)
+                // rather than the system-assigned identity which lacks Table roles.
+                var credentialOptions = new DefaultAzureCredentialOptions();
+                string? clientId = configuration["AzureWebJobsStorage:clientId"];
+                if (!string.IsNullOrEmpty(clientId))
+                    credentialOptions.ManagedIdentityClientId = clientId;
+
+                var serviceClient = new TableServiceClient(new Uri(tableUri), new DefaultAzureCredential(credentialOptions));
                 _tableClient = serviceClient.GetTableClient(JobsTableName);
-                _logger.LogInformation("TableStorageHelper initialised with URI {Uri}", tableUri);
+                _logger.LogInformation("TableStorageHelper initialised with URI {Uri} (clientId={ClientId})",
+                    tableUri, clientId ?? "default");
             }
             else
             {

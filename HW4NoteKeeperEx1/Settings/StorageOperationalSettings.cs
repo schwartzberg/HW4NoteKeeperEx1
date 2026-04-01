@@ -9,16 +9,22 @@ namespace HW4NoteKeeperEx1.Settings
     public class StorageOperationalSettings
     {
         /// <summary>
-        /// Name of the Azure Storage Queue that receives zip-creation requests.
-        /// Default: <c>attachment-zip-requests</c>.
+        /// Name of the Azure Storage Queue that receives Ex1 zip-creation requests (with job tracking).
+        /// Default: <c>attachment-zip-requests-ex1</c>.
         /// </summary>
         public string ZipRequestsQueueName { get; set; } = "attachment-zip-requests-ex1";
 
         /// <summary>
-        /// Name of the Azure Storage Queue that receives unprocessable zip-creation requests (poison messages).
-        /// Default: <c>attachment-zip-requests-poison</c>.
+        /// Name of the Azure Storage Queue that receives unprocessable Ex1 zip-creation requests (poison messages).
+        /// Default: <c>attachment-zip-requests-ex1-poison</c>.
         /// </summary>
         public string ZipPoisonQueueName { get; set; } = "attachment-zip-requests-ex1-poison";
+
+        /// <summary>
+        /// Name of the Azure Storage Queue that receives legacy zip-creation requests (original HW4 flow, no job tracking).
+        /// Default: <c>attachment-zip-requests</c>.
+        /// </summary>
+        public string ZipRequestsLegacyQueueName { get; set; } = "attachment-zip-requests";
 
         /// <summary>
         /// Names of Azure Blob Storage containers that must <b>never</b> be deleted,

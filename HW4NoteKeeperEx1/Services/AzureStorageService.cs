@@ -117,7 +117,7 @@ namespace HW4NoteKeeperEx1.Services
         /// Returns the number of blobs in the container associated with the given note.
         /// Returns 0 if the container does not exist.
         /// </summary>
-        public async Task<int> GetBlobCountAsync(string noteId)
+        public virtual async Task<int> GetBlobCountAsync(string noteId)
         {
             BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId.ToLowerInvariant());
 
@@ -255,11 +255,12 @@ namespace HW4NoteKeeperEx1.Services
 
         /// <summary>
         /// Serialises a <see cref="ZipRequest"/> as JSON and enqueues it to the
-        /// <c>attachment-zip-requests</c> queue so the Azure Function can create the zip file.
+        /// <c>attachment-zip-requests-ex1</c> queue so the Ex1 Azure Function can create the zip file
+        /// with job-status tracking.
         /// </summary>
         /// <param name="noteId">The note ID whose attachments should be zipped.</param>
         /// <param name="zipFileId">The target blob name for the resulting zip file (e.g. "guid.zip").</param>
-        public async Task EnqueueZipRequestAsync(string noteId, string zipFileId)
+        public virtual async Task EnqueueZipRequestAsync(string noteId, string zipFileId)
         {
             QueueClient queueClient = _queueServiceClient.GetQueueClient(_operationalSettings.ZipRequestsQueueName);
             await queueClient.CreateIfNotExistsAsync();
@@ -270,7 +271,29 @@ namespace HW4NoteKeeperEx1.Services
             await queueClient.SendMessageAsync(json);
 
             _logger.LogInformation(
-                "Enqueued zip request for note {NoteId}, target file {ZipFileId}",
+                "Enqueued Ex1 zip request for note {NoteId}, target file {ZipFileId}",
+                noteId, zipFileId);
+        }
+
+        /// <summary>
+        /// Serialises a <see cref="ZipRequest"/> as JSON and enqueues it to the legacy
+        /// <c>attachment-zip-requests</c> queue so the original HW4 Azure Function can create the zip file.
+        /// No job-status tracking is performed for this path.
+        /// </summary>
+        /// <param name="noteId">The note ID whose attachments should be zipped.</param>
+        /// <param name="zipFileId">The target blob name for the resulting zip file (e.g. "guid.zip").</param>
+        public virtual async Task EnqueueLegacyZipRequestAsync(string noteId, string zipFileId)
+        {
+            QueueClient queueClient = _queueServiceClient.GetQueueClient(_operationalSettings.ZipRequestsLegacyQueueName);
+            await queueClient.CreateIfNotExistsAsync();
+
+            var message = new ZipRequest { NoteId = noteId, ZipFileId = zipFileId };
+            string json = JsonSerializer.Serialize(message);
+
+            await queueClient.SendMessageAsync(json);
+
+            _logger.LogInformation(
+                "Enqueued legacy zip request for note {NoteId}, target file {ZipFileId}",
                 noteId, zipFileId);
         }
 

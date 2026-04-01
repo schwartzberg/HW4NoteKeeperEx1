@@ -17,17 +17,20 @@ namespace HW4NoteKeeperEx1.Controllers
     public class NoteKeeperZipAttachmentControllerEx1 : ControllerBase
     {
         private readonly MyDatabaseContext _context;
+        private readonly AzureStorageService _storageService;
         private readonly JobsTableService _jobsTableService;
         private readonly TelemetryClient _telemetryClient;
         private readonly ILogger<NoteKeeperZipAttachmentControllerEx1> _logger;
 
         public NoteKeeperZipAttachmentControllerEx1(
             MyDatabaseContext context,
+            AzureStorageService storageService,
             JobsTableService jobsTableService,
             TelemetryClient telemetryClient,
             ILogger<NoteKeeperZipAttachmentControllerEx1> logger)
         {
             _context = context;
+            _storageService = storageService;
             _jobsTableService = jobsTableService;
             _telemetryClient = telemetryClient;
             _logger = logger;
@@ -140,6 +143,69 @@ namespace HW4NoteKeeperEx1.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error retrieving all job statuses for NoteId={NoteId}", noteId);
+                return StatusCode(StatusCodes.Status500InternalServerError);
+            }
+        }
+        /// <summary>
+        /// §Ex1 POST – Requests creation of a zip archive for the note's attachments using the Ex1
+        /// flow with job-status tracking. Enqueues a message to <c>attachment-zip-requests-ex1</c>
+        /// and inserts a <c>Queued</c> row into the Jobs table before returning.
+        /// </summary>
+        /// <param name="noteId">The GUID of the note whose attachments should be zipped.</param>
+        /// <returns>
+        /// 202 Accepted with a <c>Location</c> header pointing to the job-status endpoint;
+        /// 204 No Content if the note has no attachments;
+        /// 400 Bad Request if <paramref name="noteId"/> is not a valid GUID;
+        /// 404 Not Found if the note does not exist in the database.
+        /// </returns>
+        [HttpPost("/notes/{noteId}/attachmentzipfilesex1")]
+        [ProducesResponseType(StatusCodes.Status202Accepted)]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> RequestZipCreationEx1(string noteId)
+        {
+            if (!Guid.TryParse(noteId, out Guid guidNoteId))
+            {
+                _logger.LogWarning("RequestZipCreationEx1: invalid noteId '{NoteId}'", noteId);
+                return BadRequest();
+            }
+
+            try
+            {
+                bool noteExists = await _context.Notes.AnyAsync(n => n.Id == guidNoteId);
+                if (!noteExists)
+                {
+                    _logger.LogWarning("RequestZipCreationEx1: note {NoteId} not found", noteId);
+                    return NotFound();
+                }
+
+                int attachmentCount = await _storageService.GetBlobCountAsync(noteId);
+                if (attachmentCount == 0)
+                {
+                    _logger.LogInformation("RequestZipCreationEx1: note {NoteId} has no attachments – returning 204", noteId);
+                    return NoContent();
+                }
+
+                string zipFileId = $"{Guid.NewGuid()}.zip";
+
+                // Insert Queued row BEFORE enqueuing so the function always finds the row
+                await _jobsTableService.InsertQueuedJobAsync(noteId, zipFileId);
+
+                // Enqueue to the Ex1 queue (attachment-zip-requests-ex1)
+                await _storageService.EnqueueZipRequestAsync(noteId, zipFileId);
+
+                _telemetryClient.TrackEvent("ZipRequestedEx1",
+                    new Dictionary<string, string> { { "noteId", noteId }, { "zipFileId", zipFileId } });
+
+                // Location points to the job-status endpoint so clients can poll for progress
+                string locationUrl = $"{Request.Scheme}://{Request.Host}/notes/{noteId}/attachmentzipfiles/jobs/{zipFileId}";
+                return Accepted(locationUrl, (object?)null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error requesting Ex1 zip creation for note {NoteId}", noteId);
                 return StatusCode(StatusCodes.Status500InternalServerError);
             }
         }

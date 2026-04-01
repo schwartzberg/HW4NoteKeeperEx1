@@ -34,7 +34,7 @@ namespace HW4NoteKeeperEx1.Services
         /// </summary>
         /// <param name="noteId">The note ID (partition key).</param>
         /// <param name="zipFileId">The zip file ID (row key).</param>
-        public async Task InsertQueuedJobAsync(string noteId, string zipFileId)
+        public virtual async Task InsertQueuedJobAsync(string noteId, string zipFileId)
         {
             string normalizedNoteId = NormalizeNoteId(noteId);
             var entity = new JobEntity
