@@ -308,7 +308,11 @@ namespace HW4NoteKeeperEx1
 
             var credential = new DefaultAzureCredential(credentialOptions);
             var queueServiceUri = new Uri($"https://{storageSettings.AccountName}.queue.core.windows.net");
-            builder.Services.AddSingleton(new QueueServiceClient(queueServiceUri, credential));
+            var queueClientOptions = new QueueClientOptions
+            {
+                MessageEncoding = QueueMessageEncoding.Base64
+            };
+            builder.Services.AddSingleton(new QueueServiceClient(queueServiceUri, credential, queueClientOptions));
         }
 
         /// <summary>

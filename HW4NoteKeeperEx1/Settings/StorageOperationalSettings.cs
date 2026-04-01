@@ -27,6 +27,12 @@ namespace HW4NoteKeeperEx1.Settings
         public string ZipRequestsLegacyQueueName { get; set; } = "attachment-zip-requests";
 
         /// <summary>
+        /// Name of the Azure Storage Queue for unprocessable legacy zip-creation requests (poison messages).
+        /// Default: <c>attachment-zip-requests-poison</c>.
+        /// </summary>
+        public string ZipRequestsLegacyPoisonQueueName { get; set; } = "attachment-zip-requests-poison";
+
+        /// <summary>
         /// Names of Azure Blob Storage containers that must <b>never</b> be deleted,
         /// even during the storage-reset that happens at seeding time.
         /// Default: <c>[ "app-package-func-hw4", "azure-webjobs-hosts", "azure-webjobs-secrets" ]</c>.

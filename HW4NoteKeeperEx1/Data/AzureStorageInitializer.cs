@@ -66,7 +66,9 @@ namespace HW4NoteKeeperEx1.Data
             string[] queueNames =
             [
                 _operationalSettings.ZipRequestsQueueName,
-                _operationalSettings.ZipPoisonQueueName
+                _operationalSettings.ZipPoisonQueueName,
+                _operationalSettings.ZipRequestsLegacyQueueName,
+                _operationalSettings.ZipRequestsLegacyPoisonQueueName
             ];
 
             foreach (string queueName in queueNames)

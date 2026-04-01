@@ -55,7 +55,7 @@ namespace HW4NoteKeeperEx1.Services
         /// Retrieves a single job entity by noteId and zipFileId.
         /// Returns <c>null</c> if the row does not exist.
         /// </summary>
-        public async Task<JobEntity?> GetJobAsync(string noteId, string zipFileId)
+        public virtual async Task<JobEntity?> GetJobAsync(string noteId, string zipFileId)
         {
             try
             {
@@ -73,7 +73,7 @@ namespace HW4NoteKeeperEx1.Services
         /// Retrieves all job entities for the given noteId (partition key).
         /// Returns an empty list if no rows exist.
         /// </summary>
-        public async Task<List<JobEntity>> GetJobsByNoteIdAsync(string noteId)
+        public virtual async Task<List<JobEntity>> GetJobsByNoteIdAsync(string noteId)
         {
             string normalizedNoteId = NormalizeNoteId(noteId);
             var results = new List<JobEntity>();

@@ -32,7 +32,7 @@ namespace HW4NoteKeeperEx1.Tests
     public class NoteKeeperSeedingTests : IAsyncLifetime
     {
         private static readonly string BaseUrl =
-            "https://app-notekeeper-cscie94-ps-HW4-1-gjegduaqfccbd2bt.swedencentral-01.azurewebsites.net/";
+            "https://app-notekeeper-cscie94-ps-hw4-ex1-fzb7ffggbqhhcybz.swedencentral-01.azurewebsites.net/";
 
         /// <summary>
         /// Azure-managed containers that survive seeding (e.g. Function App deployment package and runtime containers).
@@ -383,6 +383,189 @@ namespace HW4NoteKeeperEx1.Tests
                     containerCount++;
             }
             containerCount.Should().Be(4, "Should still have exactly 4 containers after re-seeding");
+        }
+
+        /// <summary>
+        /// Verifies that notes created via the API (e.g. during E2E testing) are removed by seeding.
+        /// This is the exact scenario that caused 6 records instead of 4 after redeployment.
+        /// </summary>
+        [Fact]
+        public async Task Seeding_RemovesExtraNotes_CreatedViaAPI()
+        {
+            // Arrange: Run seeding first to get a clean baseline
+            await _dbInitializer.InitializeAsync();
+
+            // Create 2 extra notes via API (simulates E2E test pollution)
+            var extraNote1 = new { Summary = "E2E Test Note", Details = "Should be removed by seeding" };
+            var extraNote2 = new { Summary = "E2E Test Note 2", Details = "Also should be removed" };
+            await _client.PostAsJsonAsync("/NoteKeeper", extraNote1);
+            await _client.PostAsJsonAsync("/NoteKeeper", extraNote2);
+
+            // Verify we now have 6 notes
+            var beforeResponse = await _client.GetAsync("/NoteKeeper");
+            var beforeNotes = await beforeResponse.Content.ReadFromJsonAsync<List<NoteResult>>(_jsonOptions);
+            beforeNotes!.Count.Should().Be(6, "Should have 6 notes (4 seed + 2 extra) before re-seeding");
+
+            // Act: Re-run seeding
+            await _dbInitializer.InitializeAsync();
+            await Task.Delay(1000);
+
+            // Assert: Only 4 seed notes remain
+            var afterResponse = await _client.GetAsync("/NoteKeeper");
+            var afterNotes = await afterResponse.Content.ReadFromJsonAsync<List<NoteResult>>(_jsonOptions);
+            afterNotes!.Count.Should().Be(4, "Seeding must remove extra notes — only 4 seed notes should remain");
+
+            // Verify none of the extra notes survived
+            afterNotes.Should().NotContain(n => n.Summary == "E2E Test Note");
+            afterNotes.Should().NotContain(n => n.Summary == "E2E Test Note 2");
+        }
+
+        /// <summary>
+        /// Verifies that -zip containers created by Azure Functions are removed by seeding.
+        /// This covers the scenario where zip containers from E2E testing survived redeployment.
+        /// </summary>
+        [Fact]
+        public async Task Seeding_RemovesZipContainers_CreatedByFunctions()
+        {
+            // Arrange: Create a fake -zip container (simulates Azure Function creating zip output)
+            string fakeNoteId = Guid.NewGuid().ToString();
+            string zipContainerName = $"{fakeNoteId}-zip";
+            var zipContainer = _blobServiceClient.GetBlobContainerClient(zipContainerName);
+            await zipContainer.CreateAsync();
+
+            bool existsBefore = (await zipContainer.ExistsAsync()).Value;
+            existsBefore.Should().BeTrue("Zip container should exist before seeding");
+
+            // Act: Run seeding
+            await _dbInitializer.InitializeAsync();
+
+            // Assert: -zip container should be deleted
+            bool existsAfter = (await zipContainer.ExistsAsync()).Value;
+            existsAfter.Should().BeFalse("Seeding must delete -zip containers created by functions");
+        }
+
+        /// <summary>
+        /// Verifies that seeding clears all 4 queues (ex1, ex1-poison, legacy, legacy-poison).
+        /// </summary>
+        [Fact]
+        public async Task Seeding_ClearsAllFourQueues()
+        {
+            // Arrange: Get operational settings to know queue names
+            var settings = new StorageOperationalSettings();
+            string[] queueNames = new[]
+            {
+                settings.ZipRequestsQueueName,
+                settings.ZipPoisonQueueName,
+                settings.ZipRequestsLegacyQueueName,
+                settings.ZipRequestsLegacyPoisonQueueName
+            };
+
+            // Enqueue a test message in each queue
+            string queueUrl = _blobServiceClient.Uri.ToString()
+                .Replace(".blob.", ".queue.", StringComparison.OrdinalIgnoreCase);
+            var queueServiceClient = new QueueServiceClient(
+                new Uri(queueUrl),
+                new DefaultAzureCredential());
+
+            foreach (string queueName in queueNames)
+            {
+                var queueClient = queueServiceClient.GetQueueClient(queueName);
+                await queueClient.CreateIfNotExistsAsync();
+                await queueClient.SendMessageAsync("test-seeding-cleanup");
+            }
+
+            // Act: Run seeding
+            await _dbInitializer.InitializeAsync();
+
+            // Assert: All queues should be empty
+            foreach (string queueName in queueNames)
+            {
+                var queueClient = queueServiceClient.GetQueueClient(queueName);
+                if ((await queueClient.ExistsAsync()).Value)
+                {
+                    var props = await queueClient.GetPropertiesAsync();
+                    props.Value.ApproximateMessagesCount.Should().Be(0,
+                        $"Queue '{queueName}' should be empty after seeding");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Verifies that seeding clears all rows from the Jobs table.
+        /// </summary>
+        [Fact]
+        public async Task Seeding_ClearsJobsTable()
+        {
+            // Arrange: Insert a test job row
+            string testNoteId = Guid.NewGuid().ToString();
+            string testZipFileId = "test-seeding-cleanup.zip";
+
+            var entity = new TableEntity(testNoteId, testZipFileId)
+            {
+                { "Status", "Queued" },
+                { "StatusDetails", "Test row for seeding cleanup" }
+            };
+
+            var tableServiceUri = new Uri($"https://st4hw3.table.core.windows.net");
+            var tableClient = new TableServiceClient(tableServiceUri, new DefaultAzureCredential())
+                .GetTableClient("Jobs");
+            await tableClient.UpsertEntityAsync(entity);
+
+            // Act: Run seeding
+            await _dbInitializer.InitializeAsync();
+
+            // Assert: The test row should be gone
+            try
+            {
+                await tableClient.GetEntityAsync<TableEntity>(testNoteId, testZipFileId);
+                Assert.Fail("Job row should have been deleted by seeding");
+            }
+            catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+            {
+                // Expected — row was deleted
+            }
+        }
+
+        /// <summary>
+        /// Verifies that containers created for notes added via the API are deleted after re-seeding.
+        /// Covers the scenario where E2E test note containers persisted across deployments.
+        /// </summary>
+        [Fact]
+        public async Task Seeding_RemovesContainers_ForAPICreatedNotes()
+        {
+            // Arrange: Create a note via API (creates a container)
+            var extraNote = new { Summary = "Temp test note", Details = "Container should not survive seeding" };
+            var createResp = await _client.PostAsJsonAsync("/NoteKeeper", extraNote);
+            createResp.EnsureSuccessStatusCode();
+            var created = await createResp.Content.ReadFromJsonAsync<NoteResult>(_jsonOptions);
+
+            // Upload an attachment to force container creation
+            string noteId = created!.Id.ToString().ToLowerInvariant();
+            var containerClient = _blobServiceClient.GetBlobContainerClient(noteId);
+
+            // Container may or may not exist yet (depends on whether PUT attachment was called).
+            // Create it explicitly to simulate real usage.
+            await containerClient.CreateIfNotExistsAsync();
+
+            bool existsBefore = (await containerClient.ExistsAsync()).Value;
+            existsBefore.Should().BeTrue("Container for API-created note should exist before seeding");
+
+            // Act: Re-run seeding
+            await _dbInitializer.InitializeAsync();
+
+            // Assert: Extra note container should be deleted
+            bool existsAfter = (await containerClient.ExistsAsync()).Value;
+            existsAfter.Should().BeFalse(
+                $"Container '{noteId}' for API-created note should be deleted by seeding");
+
+            // Assert: Only 4 seed containers remain
+            int containerCount = 0;
+            await foreach (var container in _blobServiceClient.GetBlobContainersAsync())
+            {
+                if (!_protectedContainers.Contains(container.Name) && !container.Name.StartsWith("$"))
+                    containerCount++;
+            }
+            containerCount.Should().Be(4, "Only 4 seed containers should remain after seeding");
         }
 
         #endregion
