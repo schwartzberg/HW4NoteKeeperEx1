@@ -9,6 +9,7 @@ var host = new HostBuilder()
     .ConfigureServices(services =>
     {
         services.AddSingleton<BlobStorageHelper>();
+        services.AddSingleton<TableStorageHelper>();
         services.AddScoped<AttachmentZipProcessor>();
     })
     .ConfigureLogging(logging =>

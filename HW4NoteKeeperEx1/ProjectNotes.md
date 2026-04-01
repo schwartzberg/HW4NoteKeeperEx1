@@ -779,3 +779,169 @@ Both container deletes use `DeleteContainerIfExistsAsync()` — idempotent, no e
 Containers tracked per test:
 - Attachment container `{noteId}` — added inside `CreateTestNoteAsync()`
 - Zip container `{noteId}-zip` — added inside each test that expects a zip
+
+---
+
+## 4.2.13 Session Fixes — Azure Function and Seeding Corrections
+
+### Protected Containers During Seeding
+
+`DeleteAllContainersAsync()` in `AzureStorageInitializer.cs` now skips:
+- **3 named containers** configured in `StorageOperationalSettings.ProtectedContainers`:
+  - `app-package-func-hw4` — Azure Function deployment package
+  - `azure-webjobs-hosts` — Azure Functions runtime host metadata
+  - `azure-webjobs-secrets` — Azure Functions secrets/keys
+- **`$`-prefixed containers** (e.g., `$logs`, `$blobchangefeed`) — Azure system containers
+
+These containers must NEVER be deleted, especially during seeding, as deleting them breaks the deployed Azure Function.
+
+### AttachmentZipHttpTestFunction — Debug-Only Compilation
+
+`AttachmentZipHttpTestFunction.cs` is wrapped in `#if DEBUG` / `#endif`. This HTTP-triggered test function is only compiled in Debug builds and is **excluded from production deployments** (VS Publish uses Release configuration).
+
+### SQL Table Name in AttachmentZipProcessor
+
+The raw SQL query in `NoteExistsInDatabaseAsync()` uses `Note` (the actual SQL table name configured via `modelBuilder.Entity<Note>().ToTable("Note")`), NOT `Notes` (which is only the EF Core `DbSet` property name).
+
+```sql
+SELECT COUNT(1) FROM Note WHERE Id = @NoteId
+```
+
+### Azure Function Environment Variables (func-HW4)
+
+Required App Settings (in Azure Portal → Environment variables → App Settings tab):
+
+| Setting | Purpose |
+|---------|---------|
+| `ConnectionStrings__DefaultConnection` | SQL connection string with `Authentication=Active Directory Default` |
+| `AzureWebJobsStorage__blobServiceUri` | Managed identity storage access |
+| `AzureWebJobsStorage__clientId` | Managed identity client ID |
+| `AzureWebJobsStorage__credential` | `managedidentity` |
+| `AzureWebJobsStorage__queueServiceUri` | Queue endpoint for managed identity |
+| `AzureWebJobsStorage__tableServiceUri` | Table endpoint for managed identity |
+| `AttachmentZipRequests__clientId` | Queue trigger managed identity |
+| `AttachmentZipRequests__credential` | `managedidentity` |
+| `AttachmentZipRequests__queueServiceUri` | Queue endpoint for zip requests |
+| `StorageBlobServiceUri` | Blob service URI for processor |
+
+**Important:** Visual Studio Zip Deploy does NOT sync `local.settings.json` to Azure. Settings configured in Azure Portal remain intact after publish.
+
+---
+
+## 4.2.14 Extra Credit — HW4NoteKeeperEx1
+
+The solution ending with **Ex1** (`HW4NoteKeeperEx1`) is being updated with:
+
+> **Extra Credit 1: Add support for a job status tracking table.**
+
+This feature adds a database table to track the status of background zip-creation jobs, enabling the API to report job progress and completion status to clients.
+
+---
+
+## 4.2.15 Extra Credit 1 — Azure Resources Created
+
+### Azure Table: Jobs
+
+An Azure Table named **`Jobs`** was created in the `st4hw3` storage account for tracking job status.
+
+| Setting | Value |
+|---------|-------|
+| Table name | `Jobs` |
+| Storage account | `st4hw3` |
+| URL | `https://st4hw3.table.core.windows.net/Jobs` |
+| Purpose | Track status of background zip-creation jobs (Extra Credit 1) |
+
+### Azure Queue: attachment-zip-requests-ex1
+
+A new Azure Storage Queue named **`attachment-zip-requests-ex1`** was created in the `st4hw3` storage account, dedicated to the Ex1 solution.
+
+| Setting | Value |
+|---------|-------|
+| Queue name | `attachment-zip-requests-ex1` |
+| Storage account | `st4hw3` |
+| URL | `https://st4hw3.queue.core.windows.net/attachment-zip-requests-ex1` |
+| Poison queue | `attachment-zip-requests-ex1-poison` (auto-created by Azure Functions runtime) |
+| Purpose | Separate queue for Ex1 zip requests, so Ex1 and the original solution do not interfere with each other |
+
+**Note:** The original solution continues to use `attachment-zip-requests`. The Ex1 solution uses `attachment-zip-requests-ex1`. Both queues coexist in the same storage account.
+
+The `StorageOperationalSettings` in `appsettings.json` (Ex1 only) was updated:
+- `ZipRequestsQueueName`: `attachment-zip-requests-ex1`
+- `ZipPoisonQueueName`: `attachment-zip-requests-ex1-poison`
+- `JobsTableName`: `Jobs`
+
+---
+
+## 4.2.16 Extra Credit 1 — Implementation Details
+
+### Overview
+Extra Credit 1 adds job status tracking for zip-creation operations. Every time a zip is requested, a row is inserted into the Azure Storage `Jobs` table tracking the lifecycle: **Queued → InProgress → Completed/Failed**.
+
+### Jobs Table Schema (Azure Table Storage)
+
+| Column | Value | Description |
+|--------|-------|-------------|
+| PartitionKey | noteId | Groups all jobs for a note together |
+| RowKey | zipFileId | Unique identifier for the zip file (e.g., `{guid}.zip`) |
+| Status | `Queued`, `InProgress`, `Completed`, `Failed` | Current job state |
+| StatusDetails | Formatted string | Human-readable status with IDs |
+| Timestamp | DateTimeOffset | Azure Table auto-managed timestamp |
+
+### StatusDetails Format (per requirement §2.4.1–2.4.4)
+- Queued: `"Queued: Zip File Id: {zipFileId} NoteId: {noteId}"`
+- InProgress: `"In Progress: Zip File Id: {zipFileId} NoteId: {noteId}"`
+- Completed: `"Completed: zipFileId: {zipFileId} containerId: {containerId}"`
+- Failed: `"Failed: Zip File Id: {zipFileId} NoteId: {noteId}"`
+
+### New Files Created
+
+| File | Project | Purpose |
+|------|---------|---------|
+| `Models\JobEntity.cs` | Both Web API and Functions | Azure Table entity class |
+| `RequestAndResultObjects\JobStatusResponse.cs` | Web API | API response DTO |
+| `Services\JobsTableService.cs` | Web API | CRUD operations on Jobs table |
+| `TableStorageHelper.cs` | Functions | Dual-path TableClient creation |
+| `Controllers\NoteKeeperZipAttachmentControllerEx1.cs` | Web API | Two new GET endpoints |
+
+### New API Endpoints (NoteKeeperZipAttachmentControllerEx1)
+
+| Method | Route | Description | Returns |
+|--------|-------|-------------|---------|
+| GET | `notes/{noteId}/attachmentzipfiles/jobs/{zipFileId}` | Get specific job status (§2.5) | 200 OK / 404 |
+| GET | `notes/{noteId}/attachmentzipfiles/jobs` | Get all job statuses for a note (§3) | 200 OK / 404 |
+
+### Enhanced POST — RequestZipCreation (§2.3.1)
+After enqueuing the zip request, the POST method now inserts a **Queued** row into the Jobs table.
+
+### Enhanced Azure Function — AttachmentZipProcessor (§2.3.2–2.3.4, §4.1.5)
+The processor now:
+1. **Check 1 (§4.1.5):** Verifies Queued row exists before starting → aborts if deleted by a concurrent DELETE
+2. Updates status to **InProgress** (§2.3.2)
+3. Performs zip creation (download blobs → build archive)
+4. **Check 2 (§4.1.5):** Re-verifies row exists before creating zip container → aborts if deleted
+5. Uploads zip blob, updates to **Completed** (§2.3.3) with containerId in StatusDetails
+6. On any failure, updates to **Failed** (§2.3.4) using safe update (no exception masking)
+
+### Enhanced DELETE — DeleteNoteWithAllAssets (§4.1–4.1.5)
+The DELETE method now:
+1. **§4.1.4:** Checks if any job has Status=InProgress → returns **409 Conflict** if so
+2. **§4.1:** Deletes all Jobs table rows for the noteId
+3. **§4.1.2:** Logs info (not error) if no rows found
+4. **§4.1.3:** Logs error on table deletion failure but continues with other operations
+5. Proceeds with existing container and database deletion
+
+### Seeding Enhancement
+`DbInitializer.InitializeAsync()` now includes Step 3c: `ClearJobsTableAsync()` — clears all rows from the Jobs table to ensure clean state after redeployment.
+
+### DI Registration
+- **Web API Program.cs:** Registers `TableClient` singleton (via `RegisterTableClient()` using `DefaultAzureCredential`) and `JobsTableService` as scoped
+- **Functions Program.cs:** Registers `TableStorageHelper` as singleton
+
+### New App Service for Ex1
+| Setting | Value |
+|---------|-------|
+| App name | `app-notekeeper-cscie94-ps-hw4-ex1` |
+| Runtime | .NET 10 |
+| OS | Linux |
+| SKU | Basic B2 |
+| Region | Sweden Central |

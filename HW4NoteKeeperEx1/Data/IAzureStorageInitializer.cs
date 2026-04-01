@@ -19,6 +19,12 @@ namespace HW4NoteKeeperEx1.Data
         Task DeleteAllContainersAsync();
 
         /// <summary>
+        /// Clears all rows from the Azure Storage Jobs table.
+        /// Called during seeding to remove stale job tracking data.
+        /// </summary>
+        Task ClearJobsTableAsync();
+
+        /// <summary>
         /// Seeds a single blob container with attachments for a specific note.
         /// Creates a private container named with the note's ID and uploads the associated attachment files.
         /// </summary>

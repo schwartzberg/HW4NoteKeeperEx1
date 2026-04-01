@@ -1,0 +1,139 @@
+using Azure;
+using Azure.Data.Tables;
+using HW4NoteKeeperEx1.Models;
+using HW4NoteKeeperEx1.Settings;
+
+namespace HW4NoteKeeperEx1.Services
+{
+    /// <summary>
+    /// Provides CRUD operations on the Azure Storage "Jobs" table for tracking
+    /// zip-creation job statuses. Used by the Web API controllers.
+    /// </summary>
+    public class JobsTableService
+    {
+        private readonly TableClient _tableClient;
+        private readonly ILogger<JobsTableService> _logger;
+
+        /// <summary>
+        /// Initializes a new instance of <see cref="JobsTableService"/>.
+        /// </summary>
+        public JobsTableService(TableClient tableClient, ILogger<JobsTableService> logger)
+        {
+            _tableClient = tableClient;
+            _logger = logger;
+        }
+
+        /// <summary>
+        /// Inserts a new job row with Status=<c>Queued</c> and the appropriate StatusDetails (§2.3.1, §2.4.1).
+        /// </summary>
+        /// <param name="noteId">The note ID (partition key).</param>
+        /// <param name="zipFileId">The zip file ID (row key).</param>
+        public async Task InsertQueuedJobAsync(string noteId, string zipFileId)
+        {
+            var entity = new JobEntity
+            {
+                PartitionKey = noteId,
+                RowKey = zipFileId,
+                Status = "Queued",
+                StatusDetails = $"Queued: Zip File Id: {zipFileId} NoteId: {noteId}"
+            };
+
+            await _tableClient.AddEntityAsync(entity);
+            _logger.LogInformation(
+                "Inserted Queued job row – NoteId={NoteId}, ZipFileId={ZipFileId}",
+                noteId, zipFileId);
+        }
+
+        /// <summary>
+        /// Retrieves a single job entity by noteId and zipFileId.
+        /// Returns <c>null</c> if the row does not exist.
+        /// </summary>
+        public async Task<JobEntity?> GetJobAsync(string noteId, string zipFileId)
+        {
+            try
+            {
+                var response = await _tableClient.GetEntityAsync<JobEntity>(noteId, zipFileId);
+                return response.Value;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Retrieves all job entities for the given noteId (partition key).
+        /// Returns an empty list if no rows exist.
+        /// </summary>
+        public async Task<List<JobEntity>> GetJobsByNoteIdAsync(string noteId)
+        {
+            var results = new List<JobEntity>();
+            var queryResults = _tableClient.QueryAsync<JobEntity>(
+                filter: $"PartitionKey eq '{noteId}'");
+
+            await foreach (var entity in queryResults)
+            {
+                results.Add(entity);
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// Returns <c>true</c> if any job for the given noteId has Status=<c>InProgress</c>.
+        /// Used by the enhanced DELETE (§4.1.4) to determine if a 409 Conflict should be returned.
+        /// </summary>
+        public async Task<bool> HasInProgressJobsAsync(string noteId)
+        {
+            var queryResults = _tableClient.QueryAsync<JobEntity>(
+                filter: $"PartitionKey eq '{noteId}' and Status eq 'InProgress'",
+                maxPerPage: 1);
+
+            await foreach (var _ in queryResults)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Deletes all job rows for the given noteId from the Jobs table.
+        /// Returns the number of rows deleted.
+        /// Per §4.1.2, callers should log info if count is 0.
+        /// Per §4.1.3, callers should catch exceptions and log errors without failing the request.
+        /// </summary>
+        public async Task<int> DeleteJobsByNoteIdAsync(string noteId)
+        {
+            var jobs = await GetJobsByNoteIdAsync(noteId);
+            int deletedCount = 0;
+
+            foreach (var job in jobs)
+            {
+                await _tableClient.DeleteEntityAsync(job.PartitionKey, job.RowKey);
+                deletedCount++;
+            }
+
+            _logger.LogInformation(
+                "Deleted {Count} job row(s) for NoteId={NoteId}", deletedCount, noteId);
+            return deletedCount;
+        }
+
+        /// <summary>
+        /// Deletes all rows from the Jobs table. Used during seeding to ensure clean state.
+        /// </summary>
+        public async Task ClearAllJobsAsync()
+        {
+            int deletedCount = 0;
+            var queryResults = _tableClient.QueryAsync<JobEntity>(select: new[] { "PartitionKey", "RowKey" });
+
+            await foreach (var entity in queryResults)
+            {
+                await _tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                deletedCount++;
+            }
+
+            _logger.LogInformation("Cleared {Count} row(s) from Jobs table during seeding", deletedCount);
+        }
+    }
+}

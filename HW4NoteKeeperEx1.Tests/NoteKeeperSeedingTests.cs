@@ -1,9 +1,11 @@
+using Azure.Data.Tables;
 using Azure.Identity;
 using Azure.Storage.Blobs;
 using Azure.Storage.Queues;
 using FluentAssertions;
 using HW4NoteKeeperEx1.Data;
 using HW4NoteKeeperEx1.RequestAndResultObjects;
+using HW4NoteKeeperEx1.Services;
 using HW4NoteKeeperEx1.Settings;
 using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
@@ -31,6 +33,17 @@ namespace HW4NoteKeeperEx1.Tests
     {
         private static readonly string BaseUrl =
             "https://app-notekeeper-cscie94-ps-HW4-1-gjegduaqfccbd2bt.swedencentral-01.azurewebsites.net/";
+
+        /// <summary>
+        /// Azure-managed containers that survive seeding (e.g. Function App deployment package and runtime containers).
+        /// These are excluded when asserting the seeded container count.
+        /// </summary>
+        private static readonly HashSet<string> _protectedContainers = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "app-package-func-hw4",
+            "azure-webjobs-hosts",
+            "azure-webjobs-secrets"
+        };
 
         private readonly HttpClient _client;
         private readonly BlobServiceClient _blobServiceClient;
@@ -87,7 +100,10 @@ namespace HW4NoteKeeperEx1.Tests
             var telClient = new TelemetryClient(new Microsoft.ApplicationInsights.Extensibility.TelemetryConfiguration());
             var storageOpsSettings = config.GetSection("StorageOperationalSettings").Get<HW4NoteKeeperEx1.Settings.StorageOperationalSettings>()
                 ?? new HW4NoteKeeperEx1.Settings.StorageOperationalSettings();
-            _storageInitializer = new AzureStorageInitializer(_blobServiceClient, queueServiceClient, storageOpsSettings, logger, telClient);
+            _storageInitializer = new AzureStorageInitializer(
+                _blobServiceClient, queueServiceClient,
+                CreateJobsTableService(config),
+                storageOpsSettings, logger, telClient);
 
             // Set up DbInitializer (we'll use this in tests to trigger seeding)
             var aiSettings = config.GetSection("AzureOpenAI").Get<AISettings>()!;
@@ -129,11 +145,12 @@ namespace HW4NoteKeeperEx1.Tests
             bool exists = (await testContainer.ExistsAsync()).Value;
             exists.Should().BeFalse("Seeding should delete all containers including test containers");
 
-            // Verify 4 seeded containers exist
+            // Verify 4 seeded containers exist (excluding protected system containers)
             var containerCount = 0;
             await foreach (var container in _blobServiceClient.GetBlobContainersAsync())
             {
-                containerCount++;
+                if (!_protectedContainers.Contains(container.Name) && !container.Name.StartsWith("$"))
+                    containerCount++;
             }
             containerCount.Should().Be(4, "Should have exactly 4 seeded containers");
         }
@@ -189,11 +206,12 @@ namespace HW4NoteKeeperEx1.Tests
             var notes = JsonSerializer.Deserialize<List<NoteResult>>(jsonContent, _jsonOptions);
             notes.Should().NotBeNull();
 
-            // Get container names from Azure Storage
+            // Get container names from Azure Storage (excluding protected system containers)
             var containerNames = new List<string>();
             await foreach (var container in _blobServiceClient.GetBlobContainersAsync())
             {
-                containerNames.Add(container.Name);
+                if (!_protectedContainers.Contains(container.Name) && !container.Name.StartsWith("$"))
+                    containerNames.Add(container.Name);
             }
 
             // Assert: Should have exactly 4 notes and 4 containers
@@ -357,13 +375,48 @@ namespace HW4NoteKeeperEx1.Tests
             // Assert: Still exactly 4 notes
             notes2.Count.Should().Be(4, "Should still have exactly 4 notes after re-seeding");
 
-            // Assert: Still exactly 4 containers
+            // Assert: Still exactly 4 containers (excluding protected system containers)
             var containerCount = 0;
             await foreach (var container in _blobServiceClient.GetBlobContainersAsync())
             {
-                containerCount++;
+                if (!_protectedContainers.Contains(container.Name) && !container.Name.StartsWith("$"))
+                    containerCount++;
             }
             containerCount.Should().Be(4, "Should still have exactly 4 containers after re-seeding");
+        }
+
+        #endregion
+
+        #region Helpers
+
+        /// <summary>
+        /// Creates a <see cref="JobsTableService"/> for test use, constructing a <see cref="TableClient"/>
+        /// from config (same approach as the Web API's Program.cs).
+        /// </summary>
+        private static JobsTableService CreateJobsTableService(IConfiguration config)
+        {
+            var storageSettings = config.GetSection("StorageAccountSettings").Get<StorageAccountSettings>();
+            string accountName = storageSettings?.AccountName ?? "st4hw3";
+            string tenantId = storageSettings?.TenantId ?? string.Empty;
+            string jobsTableName = config["StorageOperationalSettings:JobsTableName"] ?? "Jobs";
+
+            var credentialOptions = new DefaultAzureCredentialOptions
+            {
+                SharedTokenCacheTenantId = tenantId,
+                VisualStudioCodeTenantId = tenantId,
+                VisualStudioTenantId = tenantId,
+                ExcludeEnvironmentCredential = true,
+                ExcludeManagedIdentityCredential = true,
+                ExcludeWorkloadIdentityCredential = true,
+                ExcludeInteractiveBrowserCredential = true
+            };
+            var credential = new DefaultAzureCredential(credentialOptions);
+            var tableServiceUri = new Uri($"https://{accountName}.table.core.windows.net");
+            var tableServiceClient = new TableServiceClient(tableServiceUri, credential);
+            var tableClient = tableServiceClient.GetTableClient(jobsTableName);
+
+            var logger = LoggerFactory.Create(b => b.AddConsole()).CreateLogger<JobsTableService>();
+            return new JobsTableService(tableClient, logger);
         }
 
         #endregion

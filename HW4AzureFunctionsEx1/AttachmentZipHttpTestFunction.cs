@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using System.Net;
 using System.Text.Json;
 
+#if DEBUG
 namespace HW4AzureFunctionsEx1
 {
     /// <summary>
@@ -71,3 +72,4 @@ namespace HW4AzureFunctionsEx1
         }
     }
 }
+#endif

@@ -68,6 +68,9 @@ namespace HW4NoteKeeperEx1.Data
             // Step 3b: Clear the zip-requests and poison queues so stale messages don't fire post-deploy
             await _storageInitializer.ClearQueuesAsync();
 
+            // Step 3c: Clear the Jobs table so stale job tracking data is removed
+            await _storageInitializer.ClearJobsTableAsync();
+
             // Step 4: Seed the 4 default notes
             _logger.LogInformation("Seeding default notes...");
 

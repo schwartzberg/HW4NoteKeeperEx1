@@ -5,7 +5,6 @@ using Microsoft.ApplicationInsights;
 using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace HW4NoteKeeperEx1.Controllers
 {
@@ -27,6 +26,7 @@ namespace HW4NoteKeeperEx1.Controllers
     {
         private readonly MyDatabaseContext _context;
         private readonly AzureStorageService _storageService;
+        private readonly JobsTableService _jobsTableService;
         private readonly TelemetryClient _telemetryClient;
         private readonly ILogger<NoteKeeperZipAttachmentController> _logger;
 
@@ -36,11 +36,13 @@ namespace HW4NoteKeeperEx1.Controllers
         public NoteKeeperZipAttachmentController(
             MyDatabaseContext context,
             AzureStorageService storageService,
+            JobsTableService jobsTableService,
             TelemetryClient telemetryClient,
             ILogger<NoteKeeperZipAttachmentController> logger)
         {
             _context = context;
             _storageService = storageService;
+            _jobsTableService = jobsTableService;
             _telemetryClient = telemetryClient;
             _logger = logger;
         }
@@ -84,7 +86,7 @@ namespace HW4NoteKeeperEx1.Controllers
                     return NotFound();
                 }
 
-                // 1.1.4 – Note must have at least one attachment
+                // 1.1.5 – Note must have at least one attachment
                 int attachmentCount = await _storageService.GetBlobCountAsync(noteId);
                 if (attachmentCount == 0)
                 {
@@ -95,6 +97,9 @@ namespace HW4NoteKeeperEx1.Controllers
                 // Generate the target zip file name and enqueue the request
                 string zipFileId = $"{Guid.NewGuid()}.zip";
                 await _storageService.EnqueueZipRequestAsync(noteId, zipFileId);
+
+                // §2.3.1 – Insert a Queued row into the Jobs table
+                await _jobsTableService.InsertQueuedJobAsync(noteId, zipFileId);
 
                 _telemetryClient.TrackEvent("ZipRequested",
                     new Dictionary<string, string> { { "noteId", noteId }, { "zipFileId", zipFileId } });
@@ -295,23 +300,26 @@ namespace HW4NoteKeeperEx1.Controllers
 
         // ─── DELETE notes/{noteId} – Enhanced note delete (1.5) ──────────────────
 
-        /// <summary>
-        /// Permanently deletes the note and all associated data:
-        /// the note record (with cascade-deleted tags) from the database,
-        /// the attachment blob container (named with the note ID) and all its blobs,
-        /// and the zip blob container (named "{noteId}-zip") and all its blobs.
-        /// </summary>
-        /// <param name="noteId">The GUID of the note to delete.</param>
-        /// <returns>
-        /// 204 No Content on success;
-        /// 400 Bad Request if <paramref name="noteId"/> is not a valid GUID;
-        /// 404 Not Found if the note does not exist in the database;
-        /// 500 Internal Server Error if an unexpected error occurs.
-        /// </returns>
+    /// <summary>
+    /// Permanently deletes the note and all associated data:
+    /// the note record (with cascade-deleted tags) from the database,
+    /// the attachment blob container (named with the note ID) and all its blobs,
+    /// the zip blob container (named "{noteId}-zip") and all its blobs,
+    /// and all job tracking rows in the Azure Storage Jobs table.
+    /// </summary>
+    /// <param name="noteId">The GUID of the note to delete.</param>
+    /// <returns>
+    /// 204 No Content on success;
+    /// 400 Bad Request if <paramref name="noteId"/> is not a valid GUID;
+    /// 404 Not Found if the note does not exist in the database;
+    /// 409 Conflict if any zip-creation job for this note is currently InProgress (§4.1.4);
+    /// 500 Internal Server Error if an unexpected error occurs.
+    /// </returns>
         [HttpDelete]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
         [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
         [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> DeleteNoteWithAllAssets(string noteId)
         {
@@ -339,6 +347,46 @@ namespace HW4NoteKeeperEx1.Controllers
                     return NotFound();
                 }
 
+                // §4.1.4 – If any job is InProgress, fail with 409 Conflict
+                try
+                {
+                    bool hasInProgress = await _jobsTableService.HasInProgressJobsAsync(noteId);
+                    if (hasInProgress)
+                    {
+                        _logger.LogWarning(
+                            "DeleteNoteWithAllAssets: note {NoteId} has InProgress compression job(s) – returning 409 Conflict",
+                            noteId);
+                        return Conflict();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // §4.1.3 – Log error but continue with delete operations
+                    _logger.LogError(ex,
+                        "DeleteNoteWithAllAssets: error checking InProgress jobs for note {NoteId} – continuing with delete",
+                        noteId);
+                }
+
+                // §4.1 – Delete all job rows for this noteId from the Jobs table
+                try
+                {
+                    int deletedJobCount = await _jobsTableService.DeleteJobsByNoteIdAsync(noteId);
+
+                    // §4.1.2 – Log info if no rows existed
+                    if (deletedJobCount == 0)
+                    {
+                        _logger.LogInformation(
+                            "DeleteNoteWithAllAssets: no job rows found in Jobs table for note {NoteId}", noteId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // §4.1.3 – Log error but do not fail the request
+                    _logger.LogError(ex,
+                        "DeleteNoteWithAllAssets: error deleting job rows for note {NoteId} from Jobs table – continuing",
+                        noteId);
+                }
+
                 // Delete attachment container (and all blobs) – idempotent if it doesn't exist
                 await _storageService.DeleteContainerIfExistsAsync(noteId);
 
@@ -352,7 +400,7 @@ namespace HW4NoteKeeperEx1.Controllers
                 _telemetryClient.TrackEvent("NoteDeletedWithAllAssets",
                     new Dictionary<string, string> { { "noteId", noteId } });
 
-                _logger.LogInformation("Deleted note {NoteId} with all storage assets", noteId);
+                _logger.LogInformation("Deleted note {NoteId} with all storage assets and job rows", noteId);
                 return NoContent();
             }
             catch (Exception ex)

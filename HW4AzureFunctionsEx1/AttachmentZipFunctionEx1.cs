@@ -9,23 +9,23 @@ namespace HW4AzureFunctionsEx1
     /// Azure Function triggered by messages in the <c>attachment-zip-requests</c> queue.
     /// Delegates all business logic to <see cref="AttachmentZipProcessor"/>.
     /// </summary>
-    public class AttachmentZipFunction
+    public class AttachmentZipFunctionEx1
     {
         private readonly AttachmentZipProcessor _processor;
-        private readonly ILogger<AttachmentZipFunction> _logger;
+        private readonly ILogger<AttachmentZipFunctionEx1> _logger;
 
-        public AttachmentZipFunction(AttachmentZipProcessor processor, ILogger<AttachmentZipFunction> logger)
+        public AttachmentZipFunctionEx1(AttachmentZipProcessor processor, ILogger<AttachmentZipFunctionEx1> logger)
         {
             _processor = processor;
             _logger = logger;
         }
 
-        [Function("AttachmentZipFunction")]
+        [Function("AttachmentZipFunctionEx1")]
         public async Task Run(
-            [QueueTrigger("attachment-zip-requests", Connection = "AttachmentZipRequests")] string message,
+            [QueueTrigger("attachment-zip-requests-ex1", Connection = "AttachmentZipRequests")] string message,
             FunctionContext context)
         {
-            _logger.LogInformation("AttachmentZipFunction triggered. RawMessage={Message}", message);
+            _logger.LogInformation("AttachmentZipFunctionEx1 triggered. RawMessage={Message}", message);
 
             ZipRequest? request;
             try

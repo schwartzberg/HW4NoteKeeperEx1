@@ -499,6 +499,50 @@ items.Add(result);
 public class YourTestClass { }
 ```
 
+### Issue: Azure Function "Unable to load the proper Managed Identity" error
+**Root Cause**: When using a **user-assigned managed identity** with Azure Functions (especially on Flex Consumption plan), the Function App needs the `AZURE_CLIENT_ID` environment variable set to the **Client ID** of the managed identity. Without it, the runtime cannot determine which identity to use.
+
+**Solution**:
+1. Go to Azure Portal → Managed Identities → `[your-identity-name]`
+2. Copy the **Client ID** (NOT the Object ID — these are different GUIDs)
+3. Go to Azure Portal → Function App → Environment variables → App Settings
+4. Add: `AZURE_CLIENT_ID` = `[the Client ID from step 2]`
+5. Also ensure the identity is listed under Function App → Identity → User assigned tab
+6. Restart the Function App
+
+**Also check the SQL connection string**:
+- Use `Authentication=Active Directory Managed Identity` (not `Active Directory Default`)
+- Include `User Id=[Client ID of managed identity]` in the connection string
+- The `User Id` must be the **Client ID**, not the Object ID
+
+**Common mistake**: Confusing Client ID vs Object ID:
+| Field | Also called | Use for |
+|-------|------------|---------|
+| **Client ID** | Application ID | `User Id=` in connection strings, `AZURE_CLIENT_ID` env var |
+| **Object ID** | Principal ID | RBAC role assignments only |
+
+### Issue: Azure Function seeding deletes system containers
+**Root Cause**: `DeleteAllContainersAsync()` was deleting Azure Functions runtime containers.
+
+**Solution**: Add these to `ProtectedContainers` in `StorageOperationalSettings`:
+- `app-package-func-hw4` — deployment package
+- `azure-webjobs-hosts` — runtime host metadata
+- `azure-webjobs-secrets` — function secrets/keys
+
+Also skip `$`-prefixed containers (e.g., `$logs`, `$blobchangefeed`):
+```csharp
+if (protectedContainers.Contains(container.Name) || container.Name.StartsWith("$"))
+    continue;
+```
+
+### Issue: Test-only Azure Function deployed to production
+**Solution**: Wrap test/debug-only functions in `#if DEBUG` / `#endif`. Visual Studio Publish uses Release configuration by default, so the function is excluded from the compiled output.
+
+### Issue: Raw SQL query uses wrong table name
+**Root Cause**: EF Core `DbSet<Note> Notes` property name (`Notes`) is NOT the SQL table name. The actual table name is set by `modelBuilder.Entity<Note>().ToTable("Note")`.
+
+**Solution**: Always check `OnModelCreating()` in the DbContext for `.ToTable()` calls before writing raw SQL. Use the mapped table name, not the DbSet property name.
+
 ## Running Tests
 
 ```bash

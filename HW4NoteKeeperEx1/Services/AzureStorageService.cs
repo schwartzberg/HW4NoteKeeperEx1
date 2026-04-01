@@ -58,7 +58,7 @@ namespace HW4NoteKeeperEx1.Services
         /// <returns><c>true</c> if the blob was newly created; <c>false</c> if it was updated.</returns>
         public async Task<bool> UploadAttachmentAsync(string noteId, string attachmentId, IFormFile fileData)
         {
-            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId);
+            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId.ToLowerInvariant());
             await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
 
             BlobClient blobClient = containerClient.GetBlobClient(attachmentId);
@@ -92,7 +92,7 @@ namespace HW4NoteKeeperEx1.Services
         /// </returns>
         public async Task<AttachmentDeleteResult> DeleteAttachmentAsync(string noteId, string attachmentId)
         {
-            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId);
+            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId.ToLowerInvariant());
             BlobClient blobClient = containerClient.GetBlobClient(attachmentId);
 
             bool exists = (await blobClient.ExistsAsync()).Value;
@@ -119,7 +119,7 @@ namespace HW4NoteKeeperEx1.Services
         /// </summary>
         public async Task<int> GetBlobCountAsync(string noteId)
         {
-            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId);
+            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId.ToLowerInvariant());
 
             if (!(await containerClient.ExistsAsync()).Value)
                 return 0;
@@ -136,7 +136,7 @@ namespace HW4NoteKeeperEx1.Services
         /// </summary>
         public async Task<bool> BlobExistsAsync(string noteId, string attachmentId)
         {
-            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId);
+            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId.ToLowerInvariant());
             BlobClient blobClient = containerClient.GetBlobClient(attachmentId);
             return (await blobClient.ExistsAsync()).Value;
         }
@@ -152,7 +152,7 @@ namespace HW4NoteKeeperEx1.Services
         /// <param name="contentType">The MIME type of the file.</param>
         public async Task UploadAttachmentFromFileAsync(string noteId, string attachmentId, string filePath, string contentType)
         {
-            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId);
+            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId.ToLowerInvariant());
             await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
 
             BlobClient blobClient = containerClient.GetBlobClient(attachmentId);
@@ -171,7 +171,7 @@ namespace HW4NoteKeeperEx1.Services
         /// <returns><c>true</c> if the container exists; otherwise <c>false</c>.</returns>
         public async Task<bool> ContainerExistsAsync(string noteId)
         {
-            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId);
+            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId.ToLowerInvariant());
             return (await containerClient.ExistsAsync()).Value;
         }
 
@@ -186,7 +186,7 @@ namespace HW4NoteKeeperEx1.Services
         /// </returns>
         public async Task<(Stream stream, string contentType)?> DownloadAttachmentAsync(string noteId, string attachmentId)
         {
-            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId);
+            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId.ToLowerInvariant());
             
             // Check if container exists
             if (!(await containerClient.ExistsAsync()).Value)
@@ -227,7 +227,7 @@ namespace HW4NoteKeeperEx1.Services
         /// </returns>
         public async Task<List<(string attachmentId, string contentType, DateTimeOffset createdDate, DateTimeOffset lastModifiedDate, long length)>?> ListAttachmentsAsync(string noteId)
         {
-            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId);
+            BlobContainerClient containerClient = _blobServiceClient.GetBlobContainerClient(noteId.ToLowerInvariant());
 
             // Check if container exists
             if (!(await containerClient.ExistsAsync()).Value)
@@ -279,7 +279,7 @@ namespace HW4NoteKeeperEx1.Services
         /// <summary>
         /// Returns the name of the zip container for the given note ID.
         /// </summary>
-        private static string GetZipContainerName(string noteId) => $"{noteId}-zip";
+        private static string GetZipContainerName(string noteId) => $"{noteId.ToLowerInvariant()}-zip";
 
         /// <summary>
         /// Lists all zip blobs in the <c>{noteId}-zip</c> container.

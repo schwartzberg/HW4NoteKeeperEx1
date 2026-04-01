@@ -1,5 +1,6 @@
 using Azure;
 using Azure.AI.OpenAI;
+using Azure.Data.Tables;
 using Azure.Identity;
 using Azure.Storage.Blobs;
 using Azure.Storage.Queues;
@@ -160,6 +161,8 @@ namespace HW4NoteKeeperEx1
             RegisterBlobServiceClient(builder, storageAccountSettings);
             RegisterQueueServiceClient(builder, storageAccountSettings);
             builder.Services.AddScoped<HW4NoteKeeperEx1.Services.AzureStorageService>();
+            RegisterTableClient(builder, storageAccountSettings);
+            builder.Services.AddScoped<HW4NoteKeeperEx1.Services.JobsTableService>();
 
             // Register AzureStorageInitializer as singleton for seeding operations
             builder.Services.AddSingleton<HW4NoteKeeperEx1.Data.IAzureStorageInitializer, HW4NoteKeeperEx1.Data.AzureStorageInitializer>();
@@ -306,6 +309,47 @@ namespace HW4NoteKeeperEx1
             var credential = new DefaultAzureCredential(credentialOptions);
             var queueServiceUri = new Uri($"https://{storageSettings.AccountName}.queue.core.windows.net");
             builder.Services.AddSingleton(new QueueServiceClient(queueServiceUri, credential));
+        }
+
+        /// <summary>
+        /// Registers a <see cref="TableClient"/> singleton for the Jobs table using managed identity credentials,
+        /// constructing the table service URI from the storage account name.
+        /// </summary>
+        private static void RegisterTableClient(
+            WebApplicationBuilder builder,
+            HW4NoteKeeperEx1.Settings.StorageAccountSettings storageSettings)
+        {
+            var credentialOptions = new DefaultAzureCredentialOptions();
+
+            if (builder.Environment.IsDevelopment())
+            {
+                credentialOptions.SharedTokenCacheTenantId = storageSettings.TenantId;
+                credentialOptions.VisualStudioCodeTenantId = storageSettings.TenantId;
+                credentialOptions.VisualStudioTenantId = storageSettings.TenantId;
+                credentialOptions.ExcludeEnvironmentCredential = true;
+                credentialOptions.ExcludeManagedIdentityCredential = true;
+                credentialOptions.ExcludeWorkloadIdentityCredential = true;
+                credentialOptions.ExcludeInteractiveBrowserCredential = true;
+            }
+            else
+            {
+                credentialOptions.ExcludeVisualStudioCredential = true;
+                credentialOptions.ExcludeVisualStudioCodeCredential = true;
+                credentialOptions.ExcludeAzureCliCredential = true;
+                credentialOptions.ExcludeAzurePowerShellCredential = true;
+                credentialOptions.ExcludeAzureDeveloperCliCredential = true;
+                credentialOptions.ExcludeWorkloadIdentityCredential = true;
+                credentialOptions.ExcludeInteractiveBrowserCredential = true;
+            }
+
+            var credential = new DefaultAzureCredential(credentialOptions);
+            var tableServiceUri = new Uri($"https://{storageSettings.AccountName}.table.core.windows.net");
+            var tableServiceClient = new TableServiceClient(tableServiceUri, credential);
+
+            // Get or create the Jobs table
+            string jobsTableName = builder.Configuration["StorageOperationalSettings:JobsTableName"] ?? "Jobs";
+            var tableClient = tableServiceClient.GetTableClient(jobsTableName);
+            builder.Services.AddSingleton(tableClient);
         }
 
         /// <summary>

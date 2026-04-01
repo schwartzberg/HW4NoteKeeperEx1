@@ -1,6 +1,7 @@
 using Azure.Storage.Blobs;
 using Azure.Storage.Queues;
 using HW4NoteKeeperEx1.Data;
+using HW4NoteKeeperEx1.Services;
 using HW4NoteKeeperEx1.Settings;
 using Microsoft.ApplicationInsights;
 using Microsoft.EntityFrameworkCore;
@@ -10,6 +11,7 @@ namespace HW4NoteKeeperEx1.Data
     /// <summary>
     /// Initializes (seeds) Azure Blob Storage with attachment files for individual notes.
     /// Each note is represented by a private blob container named with the note's ID.
+    /// Also clears the Jobs table during seeding.
     /// </summary>
     /// <remarks>
     /// The attachment mapping mirrors the seed data defined in <see cref="DbInitializer"/>.
@@ -18,6 +20,7 @@ namespace HW4NoteKeeperEx1.Data
     {
         private readonly BlobServiceClient _blobServiceClient;
         private readonly QueueServiceClient _queueServiceClient;
+        private readonly JobsTableService _jobsTableService;
         private readonly StorageOperationalSettings _operationalSettings;
         private readonly ILogger _logger;
         private readonly TelemetryClient _telClient;
@@ -41,12 +44,14 @@ namespace HW4NoteKeeperEx1.Data
         public AzureStorageInitializer(
             BlobServiceClient blobServiceClient,
             QueueServiceClient queueServiceClient,
+            JobsTableService jobsTableService,
             StorageOperationalSettings operationalSettings,
             ILogger<AzureStorageInitializer> logger,
             TelemetryClient telClient)
         {
             _blobServiceClient = blobServiceClient;
             _queueServiceClient = queueServiceClient;
+            _jobsTableService = jobsTableService;
             _operationalSettings = operationalSettings;
             _logger = logger;
             _telClient = telClient;
@@ -87,6 +92,23 @@ namespace HW4NoteKeeperEx1.Data
         }
 
         /// <summary>
+        /// Clears all rows from the Azure Storage Jobs table.
+        /// Called during seeding to remove stale job tracking data.
+        /// </summary>
+        public async Task ClearJobsTableAsync()
+        {
+            try
+            {
+                await _jobsTableService.ClearAllJobsAsync();
+                _logger.LogInformation("Cleared all rows from Jobs table during seeding.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to clear Jobs table during seeding.");
+            }
+        }
+
+        /// <summary>
         /// Deletes all blob containers in the storage account, except those listed in
         /// <see cref="StorageOperationalSettings.ProtectedContainers"/>.
         /// </summary>
@@ -99,7 +121,8 @@ namespace HW4NoteKeeperEx1.Data
 
             await foreach (var container in _blobServiceClient.GetBlobContainersAsync())
             {
-                if (_operationalSettings.ProtectedContainers.Contains(container.Name, StringComparer.OrdinalIgnoreCase))
+                if (_operationalSettings.ProtectedContainers.Contains(container.Name, StringComparer.OrdinalIgnoreCase)
+                    || container.Name.StartsWith("$"))
                 {
                     skippedCount++;
                     _logger.LogInformation("Skipping protected container: {ContainerName}", container.Name);

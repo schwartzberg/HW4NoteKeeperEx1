@@ -502,3 +502,367 @@ Copilot session was opened with CWD pointing to `03-Assignment\HW3NoteKeeper`. A
 - Changed working directory to `C:\Users\schwa\Documents\H_DCE\cloud_computing_openai_e_94\assignments\04-Assignment\HW4NoteKeeperEx1`
 - Reverted incorrect edit made to `HW3NoteKeeper\Data\AzureStorageInitializer.cs`
 - Updated `ProjectNotes.md` in correct project: replaced `(existing from HW3)` → `sqldb-cscie94-2026_hw4` in infrastructure table
+
+---
+
+## 22. Azure Function Deployment Problems
+
+**Prompt:**
+```text
+i am having problems deploying my azure function
+```
+
+**Context:**
+Azure Function `func-HW4` was showing errors in the log stream after deployment. The function was failing to process queue messages with "Error checking database for NoteId" errors. Messages were retried 5 times then moved to the poison queue.
+
+**Resolution:**
+- Investigated the `AttachmentZipProcessor.cs` error handling flow
+- Identified that `NoteExistsInDatabaseAsync()` was throwing exceptions when SQL connection failed
+- Root cause analysis pointed to connection string and managed identity configuration issues
+
+---
+
+## 23. Requirement 1.1.4 — Post Method RequestZipCreation Compliance
+
+**Prompt:**
+```text
+Concerning the Post method in NoteKeeperZipAttachmentController.cs "RequestZipCreation" please check the requirements file HW04B Instructions1.pdf and point 1.1.4 in the requirements file. Is it implemented? Also if the NoteId is not found in the database this post method should return http code 404 and the error text indicated in point 1.1.4 of the requirements document "The note <note id> can't be found for the requested compression operation." should be logged. Is it? Please tell me where. Otherwise do it. Do not make any assumptions, ask me first.
+```
+
+**Context:**
+Verifying compliance with requirement 1.1.4 for the zip attachment POST endpoint. The requirement specifies that when a note is not found, the Azure Function should log the error message with `LogError`.
+
+**Resolution:**
+- Changed `LogWarning` → `LogError` in `AttachmentZipProcessor.cs` line 147
+- Updated log message to exact required text: `"The note {NoteId} can't be found for the requested compression operation."`
+- The 404 HTTP response was already implemented in the controller
+
+---
+
+## 24. LogError and Requirement 1.1.5 Compliance
+
+**Prompt:**
+```text
+Please change it to LogError like indicated in 1. and do 2. too
+```
+
+**Prompt:**
+```text
+Have you done point 1.1.5 in the requirements pdf? If not, please correct it, or do it.
+```
+
+**Context:**
+Ensuring both requirements 1.1.4 and 1.1.5 are correctly implemented, including fixing a mislabeled comment.
+
+**Resolution:**
+- Applied `LogError` change in `AttachmentZipProcessor.cs`
+- Fixed mislabeled comment `// 1.1.4` → `// 1.1.5` in `NoteKeeperZipAttachmentController.cs`
+- Verified 404 response is returned when NoteId is not found in database
+
+---
+
+## 25. Protected Containers — Seeding Deleting Azure Functions System Containers
+
+**Prompt:**
+```text
+when seeding ... you are not suppose to delete one container - which container is that?
+```
+
+**Prompt:**
+```text
+please see picture when seeding is done app-package-func-hw4 is deleted. The solution should never do that. Not during the seeding especially. Perhaps when you delete all containers you are also deleting app-package-func-hw4
+```
+
+**Context:**
+During database seeding, `DeleteAllContainersAsync()` was deleting Azure Functions system containers: `app-package-func-hw4`, `azure-webjobs-hosts`, and `azure-webjobs-secrets`. This broke the deployed Azure Function.
+
+**Resolution:**
+- Added `azure-webjobs-hosts` and `azure-webjobs-secrets` to `ProtectedContainers` in `StorageOperationalSettings.cs`
+- Updated `appsettings.json` to include all 3 protected containers
+- Added `|| container.Name.StartsWith("$")` skip in `AzureStorageInitializer.DeleteAllContainersAsync()` to also skip `$logs`, `$blobchangefeed` system containers
+- Updated `NoteKeeperSeedingTests.cs` with `_protectedContainers` HashSet containing all 3 containers
+- Updated 3 count loops in seeding tests to filter by protected containers AND `$`-prefix
+
+---
+
+## 26. Exclude AttachmentZipHttpTestFunction from Production Deployment
+
+**Prompt:**
+```text
+the azure function in the HW4AzureFunctionsEx1 is not working can you see why from the picture? Make no assumptions and ask me first ... also you are deploying also the http triggered function AttachmentZipHttpTest - why are you doing that? Is it necessary - AttachmentZipHttpTest is only for testing purposes - please do not deploy it when publishing to production
+```
+
+**Context:**
+`AttachmentZipHttpTestFunction` (HTTP-triggered test function) was being deployed to production alongside the real queue-triggered function. It should only be available during local development/debugging.
+
+**Resolution:**
+- Wrapped entire `AttachmentZipHttpTestFunction.cs` class in `#if DEBUG` / `#endif` preprocessor directives
+- In Release configuration (used by VS Publish), `DEBUG` is not defined → class is excluded from compilation
+- Applied fix to both `HW4AzureFunctions` and `HW4AzureFunctionsEx1` solutions
+- Verified both solutions build with 0 errors in Release mode
+
+---
+
+## 27. Azure Function SQL Connection — ConnectionStrings__DefaultConnection
+
+**Prompt:**
+```text
+the ConnectionStrings__DefaultConnection has this value Server=tcp:sql-cscie94-2026-ps.database.windows.net,1433;Initial Catalog=sqldb-cscie94-2026_hw4;Encrypt=True;TrustServerCertificate=False;Connection Timeout=120;Authentication=Active Directory Default; --- should i put it under Environment variables in the tab "Connection Strings"? please tell me how?
+```
+
+**Context:**
+User needed to verify correct placement of the SQL connection string in Azure Portal for the Function App.
+
+**Resolution:**
+- Confirmed the setting belongs in **App Settings** tab (NOT Connection Strings tab)
+- The double-underscore format `ConnectionStrings__DefaultConnection` maps to `IConfiguration.GetConnectionString("DefaultConnection")` in Azure Functions
+- The Connection Strings tab adds type-specific prefixes (e.g., `SQLAZURECONNSTR_`) which would break the code
+- `Authentication=Active Directory Default` uses `DefaultAzureCredential` from Azure.Identity for managed identity authentication
+
+---
+
+## 28. Managed Identity Verification for Azure Function
+
+**Prompt:**
+```text
+pls see screenshots -- my managed identity is id-dbadmin ... in the last two pictures you can see that the function is using user assigned managed identity - using the user id-dbadmin and you can also see the assigned roles this user has. Should i assign more roles?
+```
+
+**Context:**
+Verifying that the managed identity `id-dbadmin` has all necessary permissions for the Azure Function to access SQL and Storage.
+
+**Resolution:**
+- Confirmed `id-dbadmin` SQL user EXISTS in `sqldb-cscie94-2026_hw4` with `db_datareader` and `db_datawriter` roles ✅
+- Confirmed Function App has `id-dbadmin` as user-assigned managed identity ✅
+- Confirmed `id-dbadmin` has `Storage Blob Data Contributor`, `Storage Queue Data Contributor`, `Storage Blob Data Owner` on `st4hw3` ✅
+- No additional roles needed
+
+---
+
+## 29. Visual Studio Publish Profile Analysis — Settings Not Changing
+
+**Prompt:**
+```text
+why are my environment variables changing?
+```
+
+**Prompt:**
+```text
+this is because there are two functions!!!! func-HW4 and func-HW4a and i am using func-HW4 (not with the a at the end -- this is my confusion)
+```
+
+**Context:**
+User thought environment variables were being overwritten by VS Publish. Investigation revealed two separate function apps exist: `func-HW4` (in use, properly configured) and `func-HW4a` (empty, no functions deployed).
+
+**Resolution:**
+- Read all 5 `serviceDependencies*.json` files — they only manage `APPLICATIONINSIGHTS_CONNECTION_STRING`, nothing else
+- Confirmed VS Zip Deploy does NOT sync `local.settings.json` to Azure
+- The confusion was caused by looking at `func-HW4a` (empty app) instead of `func-HW4` (properly configured)
+- All settings on `func-HW4` were intact after publish: `ConnectionStrings__DefaultConnection`, all `AzureWebJobsStorage__*` managed-identity settings, `AttachmentZipRequests__*` settings
+
+---
+
+## 30. SQL Table Name Fix — Notes → Note
+
+**Prompt:**
+```text
+why are you using in file AttachmentZipProcessor.cs this "SELECT COUNT(1) FROM Notes WHERE Id = @NoteId" on line 140 - the table is called Note not Notes - why are you referring to table "Notes" when the table is called Note - did i not ask - make no assumptions?
+```
+
+**Context:**
+The raw SQL query in `AttachmentZipProcessor.NoteExistsInDatabaseAsync()` was using `Notes` (the EF Core `DbSet` property name) instead of `Note` (the actual SQL table name as configured by `modelBuilder.Entity<Note>().ToTable("Note")`).
+
+**Resolution:**
+- Changed `"SELECT COUNT(1) FROM Notes WHERE Id = @NoteId"` → `"SELECT COUNT(1) FROM Note WHERE Id = @NoteId"` in line 140
+- Applied fix to both `HW4AzureFunctions\AttachmentZipProcessor.cs` and `HW4AzureFunctionsEx1\AttachmentZipProcessor.cs`
+- **This was likely the root cause of the SQL error** — the query was hitting a non-existent table
+
+---
+
+## 31. Sync All Corrections to Renamed Solution
+
+**Prompt:**
+```text
+please extend all the corrections you have done until and which you have not extended already to the new renamed solution too
+```
+
+**Context:**
+Ensuring all fixes applied to HW4NoteKeeper are also present in HW4NoteKeeperEx1.
+
+**Resolution:**
+- Ran comprehensive comparison of all 7 file pairs between both solutions
+- Confirmed all fixes were already synced — zero logic differences found
+- Built `HW4NoteKeeperEx1Solution.slnx` in Release: 0 errors, 0 warnings
+
+---
+
+## 32. Update MyPrompts.md and ProjectNotes.md
+
+**Prompt:**
+```text
+please update MyPrompts.md in both solutions (these files exist - do not create new ones) in both solutions with the last prompts and also the ProjectNotes.md files (they exist) as needed
+```
+
+**Context:**
+Catching up on prompt documentation for all interactions in this session.
+
+**Resolution:**
+- Added prompts #22 through #32 to MyPrompts.md in both solutions
+- Updated ProjectNotes.md in both solutions with technical notes about fixes applied
+
+---
+
+## 33. Managed Identity Authentication Failure
+
+**Prompt:**
+```text
+i am getting this exception
+
+ManagedIdentityCredential authentication failed: [Managed Identity] Error Message: Unable to load the proper Managed Identity...
+
+this is my defaultconnnection setting value for my azure function:
+Server=tcp:sql-cscie94-2026-ps.database.windows.net,1433;Initial Catalog=sqldb-cscie94-2026_hw4;Encrypt=True;TrustServerCertificate=False;Connection Timeout=120;Authentication=Active Directory Managed Identity;User Id=628ddd62-e831-41cd-9db8-5823c0647f43;
+
+what could be the problem the user id - is my the client id (the guid) of my managed user id-dbadmin
+```
+
+**Context:**
+Azure Function `func-HW4` was failing with `ManagedIdentityCredential` authentication error when trying to connect to SQL database.
+
+**Resolution:**
+- Root cause: Missing `AZURE_CLIENT_ID` environment variable in the Azure Function App settings
+- When using a **user-assigned managed identity**, `AZURE_CLIENT_ID` must be set to the identity's Client ID so `DefaultAzureCredential` / `ManagedIdentityCredential` knows which identity to use
+- User confirmed adding `AZURE_CLIENT_ID` to App Settings fixed the issue
+
+---
+
+## 34. Update Copilot Instructions with Managed Identity Troubleshooting
+
+**Prompt:**
+```text
+it was the above AZURE_CLIENT_ID that was missing. please update .github/copilot-instructions.md with this so it does not take so long to debug this the next time
+```
+
+**Context:**
+After resolving the managed identity issue, user wanted the troubleshooting knowledge documented.
+
+**Resolution:**
+- Added 5 new troubleshooting entries to `.github/copilot-instructions.md` in both solutions
+- Covers: AZURE_CLIENT_ID requirement, Client ID vs Object ID confusion, seeding deleting system containers, test functions deploying to production, SQL table name mismatch
+
+---
+
+## 35. DELETE Attachment Endpoint Not Working — Initial Report
+
+**Prompt:**
+```text
+concerning the delete function here - it is not working - can you see why?
+(Swagger screenshot of DELETE /notes/{noteId}/attachments/{attachmentId})
+```
+
+**Context:**
+User reported the DELETE attachment endpoint was returning HTTP 500 errors.
+
+**Resolution:**
+- Asked user for specific error details (status code, error message)
+
+---
+
+## 36. DELETE Attachment — InvalidResourceName Fix
+
+**Prompt:**
+```text
+the error is from file NoteKeeperAttachmentController.cs from the DeleteAttachment method and this is the error http code 500
+Azure.RequestFailedException: The specified resource name contains invalid characters.
+ErrorCode: InvalidResourceName
+(Screenshots showing the error logs and the existing container with lowercase name)
+```
+
+**Context:**
+DELETE attachment returned HTTP 500. Azure Blob Storage error: `InvalidResourceName — The specified resource name contains invalid characters.` The noteId `B465EF47-00F2-4779-BE46-E2A8FF01D605` contained uppercase letters, but Azure container names must be all lowercase.
+
+**Resolution:**
+- Root cause: `AzureStorageService` was passing `noteId` directly to `GetBlobContainerClient()` without lowercasing. Azure Blob Storage container names must be lowercase only.
+- `AzureStorageInitializer` already had the correct pattern: `noteId.ToString().ToLowerInvariant()` (line 149)
+- Fixed ALL 10 methods in `AzureStorageService.cs` that use noteId as a container name by adding `.ToLowerInvariant()`:
+  - `UploadAttachmentAsync`, `DeleteAttachmentAsync`, `GetBlobCountAsync`, `BlobExistsAsync`
+  - `UploadAttachmentFromFileAsync`, `ContainerExistsAsync`, `DownloadAttachmentAsync`, `ListAttachmentsAsync`
+  - `GetZipContainerName` (affects all zip operations: list, download, delete, exists)
+- Applied same fix to both HW4NoteKeeper and HW4NoteKeeperEx1 solutions
+- Both solutions build successfully with 0 errors
+
+---
+
+## 37. Extra Credit 1 — Azure Table "Jobs" and Queue "attachment-zip-requests-ex1"
+
+**Prompt:**
+```text
+I created an Azure Table called "Jobs" in the same azure storage (st4hw3). I also created a new queue called attachment-zip-requests-ex1 for this too. Update ProjectNotes.md in both solutions. Update only the EX1 solution's secrets.json and/or appsettings.json as needed.
+```
+
+**Context:**
+Setting up Azure resources for Extra Credit 1 (job status tracking table). Created a `Jobs` table in Azure Table Storage and a dedicated queue `attachment-zip-requests-ex1` so the Ex1 solution doesn't interfere with the original solution's queue.
+
+**Resolution:**
+- Updated `ProjectNotes.md` in both solutions with section 4.2.15 documenting:
+  - Azure Table `Jobs` at `https://st4hw3.table.core.windows.net/Jobs`
+  - New queue `attachment-zip-requests-ex1` at `https://st4hw3.queue.core.windows.net/attachment-zip-requests-ex1`
+- Updated `appsettings.json` in HW4NoteKeeperEx1:
+  - Changed `ZipRequestsQueueName` from `attachment-zip-requests` to `attachment-zip-requests-ex1`
+  - Changed `ZipPoisonQueueName` from `attachment-zip-requests-poison` to `attachment-zip-requests-ex1-poison`
+  - Added `JobsTableName`: `Jobs`
+- Updated `secrets.json` for HW4NoteKeeperEx1:
+  - Added `StorageAccountSettings:TableEndpoint`: `https://st4hw3.table.core.windows.net/`
+
+---
+
+## 38. Extra Credit 1 — Full Implementation (Job Status Tracking)
+
+**Prompt:**
+```text
+[Multiple prompts providing detailed requirements from PDF screenshots for Extra Credit 1, paragraphs 1–4, including:
+- Overview of Jobs table schema (PartitionKey=noteId, RowKey=zipFileId, Status, StatusDetails)
+- StatusDetails format per status (Queued, InProgress, Completed, Failed)
+- Enhanced POST (§2.3.1), enhanced Azure Function (§2.3.2–2.3.4), enhanced DELETE (§4.1–4.1.5)
+- Two new GET endpoints (§2.5 and §3) in new controller
+- Clarifying questions answered: separate service classes, dual-path table auth, 409 on InProgress, seeding clears Jobs table, function checks Queued row at 2 points]
+```
+
+**Context:**
+Implementing the complete Extra Credit 1 feature: job status tracking for zip-creation operations using Azure Table Storage. Required creating new services, models, controllers, and enhancing existing endpoints and the Azure Function processor.
+
+**Resolution:**
+### New Files Created:
+- `HW4AzureFunctionsEx1\Models\JobEntity.cs` — Azure Table entity (PartitionKey=noteId, RowKey=zipFileId, Status, StatusDetails)
+- `HW4AzureFunctionsEx1\TableStorageHelper.cs` — Dual-path TableClient: connection string locally, URI+DefaultAzureCredential in Azure
+- `HW4NoteKeeperEx1\Models\JobEntity.cs` — Same entity class for Web API
+- `HW4NoteKeeperEx1\RequestAndResultObjects\JobStatusResponse.cs` — DTO: ZipFileId, TimeStamp, Status, StatusDetails
+- `HW4NoteKeeperEx1\Services\JobsTableService.cs` — Web API Jobs table CRUD (InsertQueued, Get, GetAll, HasInProgress, DeleteByNoteId, ClearAll)
+- `HW4NoteKeeperEx1\Controllers\NoteKeeperZipAttachmentControllerEx1.cs` — Two new GET endpoints:
+  - GET `notes/{noteId}/attachmentzipfiles/jobs/{zipFileId}` (§2.5 — single job status)
+  - GET `notes/{noteId}/attachmentzipfiles/jobs` (§3 — all jobs for a note)
+
+### Files Modified:
+- `HW4AzureFunctionsEx1\HW4AzureFunctionsEx1.csproj` — Added `Azure.Data.Tables` v12.11.0
+- `HW4AzureFunctionsEx1\Program.cs` — Registered `TableStorageHelper` as singleton
+- `HW4AzureFunctionsEx1\AttachmentZipProcessor.cs` — Major enhancement:
+  - Inject `TableStorageHelper`, check Queued row exists at start (§4.1.5 check 1)
+  - Update status to InProgress (§2.3.2)
+  - Re-check row before creating zip container (§4.1.5 check 2)
+  - Update to Completed on success (§2.3.3) with containerId in StatusDetails
+  - Update to Failed on failure (§2.3.4), safe update in catch blocks
+- `HW4NoteKeeperEx1\Program.cs` — Added `Azure.Data.Tables` using, `RegisterTableClient()` method, registered `JobsTableService` as scoped
+- `HW4NoteKeeperEx1\Controllers\NoteKeeperZipAttachmentController.cs` — Enhanced:
+  - POST `RequestZipCreation`: insert Queued row after enqueue (§2.3.1)
+  - DELETE `DeleteNoteWithAllAssets`: check InProgress → 409 Conflict (§4.1.4), delete all Jobs rows (§4.1), log info if none (§4.1.2), log error on failure but continue (§4.1.3)
+  - Injected `JobsTableService` into constructor
+- `HW4NoteKeeperEx1\Data\IAzureStorageInitializer.cs` — Added `ClearJobsTableAsync()` method to interface
+- `HW4NoteKeeperEx1\Data\AzureStorageInitializer.cs` — Injected `JobsTableService`, implemented `ClearJobsTableAsync()`
+- `HW4NoteKeeperEx1\Data\DbInitializer.cs` — Added Step 3c: `ClearJobsTableAsync()` call during seeding
+- `HW4NoteKeeperEx1.Tests\NoteKeeperSeedingTests.cs` — Added `CreateJobsTableService()` helper, updated constructor to pass new dependency
+
+### Build & Test Results:
+- Solution builds with 0 errors (Release)
+- All 7 integration tests pass (E2E tests skipped per policy)
+
+---

@@ -12,22 +12,24 @@ namespace HW4NoteKeeperEx1.Settings
         /// Name of the Azure Storage Queue that receives zip-creation requests.
         /// Default: <c>attachment-zip-requests</c>.
         /// </summary>
-        public string ZipRequestsQueueName { get; set; } = "attachment-zip-requests";
+        public string ZipRequestsQueueName { get; set; } = "attachment-zip-requests-ex1";
 
         /// <summary>
         /// Name of the Azure Storage Queue that receives unprocessable zip-creation requests (poison messages).
         /// Default: <c>attachment-zip-requests-poison</c>.
         /// </summary>
-        public string ZipPoisonQueueName { get; set; } = "attachment-zip-requests-poison";
+        public string ZipPoisonQueueName { get; set; } = "attachment-zip-requests-ex1-poison";
 
         /// <summary>
         /// Names of Azure Blob Storage containers that must <b>never</b> be deleted,
         /// even during the storage-reset that happens at seeding time.
-        /// Default: <c>[ "app-package-func-hw4" ]</c>.
+        /// Default: <c>[ "app-package-func-hw4", "azure-webjobs-hosts", "azure-webjobs-secrets" ]</c>.
         /// </summary>
         public List<string> ProtectedContainers { get; set; } = new()
         {
-            "app-package-func-hw4"
+            "app-package-func-hw4",
+            "azure-webjobs-hosts",
+            "azure-webjobs-secrets"
         };
     }
 }
