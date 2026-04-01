@@ -24,24 +24,31 @@ namespace HW4NoteKeeperEx1.Services
         }
 
         /// <summary>
+        /// Normalizes noteId to lowercase to ensure consistent PartitionKey casing
+        /// across Web API and Azure Functions (which lowercases for container names).
+        /// </summary>
+        private static string NormalizeNoteId(string noteId) => noteId.ToLowerInvariant();
+
+        /// <summary>
         /// Inserts a new job row with Status=<c>Queued</c> and the appropriate StatusDetails (§2.3.1, §2.4.1).
         /// </summary>
         /// <param name="noteId">The note ID (partition key).</param>
         /// <param name="zipFileId">The zip file ID (row key).</param>
         public async Task InsertQueuedJobAsync(string noteId, string zipFileId)
         {
+            string normalizedNoteId = NormalizeNoteId(noteId);
             var entity = new JobEntity
             {
-                PartitionKey = noteId,
+                PartitionKey = normalizedNoteId,
                 RowKey = zipFileId,
                 Status = "Queued",
-                StatusDetails = $"Queued: Zip File Id: {zipFileId} NoteId: {noteId}"
+                StatusDetails = $"Queued: Zip File Id: {zipFileId} NoteId: {normalizedNoteId}"
             };
 
             await _tableClient.AddEntityAsync(entity);
             _logger.LogInformation(
                 "Inserted Queued job row – NoteId={NoteId}, ZipFileId={ZipFileId}",
-                noteId, zipFileId);
+                normalizedNoteId, zipFileId);
         }
 
         /// <summary>
@@ -52,7 +59,8 @@ namespace HW4NoteKeeperEx1.Services
         {
             try
             {
-                var response = await _tableClient.GetEntityAsync<JobEntity>(noteId, zipFileId);
+                string normalizedNoteId = NormalizeNoteId(noteId);
+                var response = await _tableClient.GetEntityAsync<JobEntity>(normalizedNoteId, zipFileId);
                 return response.Value;
             }
             catch (RequestFailedException ex) when (ex.Status == 404)
@@ -67,9 +75,10 @@ namespace HW4NoteKeeperEx1.Services
         /// </summary>
         public async Task<List<JobEntity>> GetJobsByNoteIdAsync(string noteId)
         {
+            string normalizedNoteId = NormalizeNoteId(noteId);
             var results = new List<JobEntity>();
             var queryResults = _tableClient.QueryAsync<JobEntity>(
-                filter: $"PartitionKey eq '{noteId}'");
+                filter: $"PartitionKey eq '{normalizedNoteId}'");
 
             await foreach (var entity in queryResults)
             {
@@ -85,8 +94,9 @@ namespace HW4NoteKeeperEx1.Services
         /// </summary>
         public async Task<bool> HasInProgressJobsAsync(string noteId)
         {
+            string normalizedNoteId = NormalizeNoteId(noteId);
             var queryResults = _tableClient.QueryAsync<JobEntity>(
-                filter: $"PartitionKey eq '{noteId}' and Status eq 'InProgress'",
+                filter: $"PartitionKey eq '{normalizedNoteId}' and Status eq 'InProgress'",
                 maxPerPage: 1);
 
             await foreach (var _ in queryResults)
@@ -105,7 +115,8 @@ namespace HW4NoteKeeperEx1.Services
         /// </summary>
         public async Task<int> DeleteJobsByNoteIdAsync(string noteId)
         {
-            var jobs = await GetJobsByNoteIdAsync(noteId);
+            string normalizedNoteId = NormalizeNoteId(noteId);
+            var jobs = await GetJobsByNoteIdAsync(normalizedNoteId);
             int deletedCount = 0;
 
             foreach (var job in jobs)
@@ -115,7 +126,7 @@ namespace HW4NoteKeeperEx1.Services
             }
 
             _logger.LogInformation(
-                "Deleted {Count} job row(s) for NoteId={NoteId}", deletedCount, noteId);
+                "Deleted {Count} job row(s) for NoteId={NoteId}", deletedCount, normalizedNoteId);
             return deletedCount;
         }
 

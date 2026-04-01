@@ -59,10 +59,11 @@ namespace HW4AzureFunctionsEx1
                 noteId, zipFileId, zipContainerName);
 
             // §4.1.5 – Check 1: Verify the Queued row still exists before starting
-            if (!await QueuedJobExistsAsync(noteId, zipFileId))
+            var activeJob = await GetActiveJobEntityAsync(noteId, zipFileId);
+            if (activeJob is null)
             {
                 _logger.LogError(
-                    "Aborting zip processing: Queued job row not found for NoteId={NoteId}, ZipFileId={ZipFileId}. The job may have been cancelled by a DELETE.",
+                    "Aborting zip processing: active job row not found for NoteId={NoteId}, ZipFileId={ZipFileId}. The job may have been cancelled by a DELETE or already processed.",
                     noteId, zipFileId);
                 return;
             }
@@ -79,7 +80,7 @@ namespace HW4AzureFunctionsEx1
                     _logger.LogError(
                         "The note {NoteId} can't be found for the requested compression operation.",
                         noteId);
-                    await UpdateJobStatusAsync(noteId, zipFileId, "Failed",
+                    await UpdateJobStatusSafeAsync(noteId, zipFileId, "Failed",
                         $"Failed: Zip File Id: {zipFileId} NoteId: {noteId}");
                     return;
                 }
@@ -94,7 +95,7 @@ namespace HW4AzureFunctionsEx1
                     _logger.LogWarning(
                         "Attachment container '{Container}' does not exist for note {NoteId}. Nothing to zip.",
                         noteId, noteId);
-                    await UpdateJobStatusAsync(noteId, zipFileId, "Failed",
+                    await UpdateJobStatusSafeAsync(noteId, zipFileId, "Failed",
                         $"Failed: Zip File Id: {zipFileId} NoteId: {noteId}");
                     return;
                 }
@@ -107,7 +108,7 @@ namespace HW4AzureFunctionsEx1
                 if (blobNames.Count == 0)
                 {
                     _logger.LogWarning("No blobs found in container '{Container}' – zip will not be created.", noteId);
-                    await UpdateJobStatusAsync(noteId, zipFileId, "Failed",
+                    await UpdateJobStatusSafeAsync(noteId, zipFileId, "Failed",
                         $"Failed: Zip File Id: {zipFileId} NoteId: {noteId}");
                     return;
                 }
@@ -137,8 +138,9 @@ namespace HW4AzureFunctionsEx1
                     }
                 }
 
-                // §4.1.5 – Check 2: Re-verify Queued/InProgress row before creating zip container
-                if (!await QueuedJobExistsAsync(noteId, zipFileId))
+                // §4.1.5 – Check 2: Re-verify active job row before creating zip container
+                var activeJobCheck2 = await GetActiveJobEntityAsync(noteId, zipFileId);
+                if (activeJobCheck2 is null)
                 {
                     _logger.LogError(
                         "Aborting zip processing before container creation: job row not found for NoteId={NoteId}, ZipFileId={ZipFileId}. The job may have been cancelled by a DELETE.",
@@ -179,46 +181,62 @@ namespace HW4AzureFunctionsEx1
         /// <summary>
         /// Checks whether the job row still exists in the Jobs table.
         /// Used at two checkpoints per §4.1.5 to detect if a DELETE cancelled this job.
+        /// Returns the entity if found with Status=Queued or InProgress, null if row is missing.
+        /// Throws on transient errors so the queue message can be retried.
         /// </summary>
-        private async Task<bool> QueuedJobExistsAsync(string noteId, string zipFileId)
+        private async Task<JobEntity?> GetActiveJobEntityAsync(string noteId, string zipFileId)
         {
             try
             {
                 var tableClient = _tableStorageHelper.Client;
                 var response = await tableClient.GetEntityAsync<JobEntity>(noteId, zipFileId);
-                return response.Value != null;
+                var entity = response.Value;
+                if (entity != null && (entity.Status == "Queued" || entity.Status == "InProgress"))
+                {
+                    return entity;
+                }
+                // Row exists but is in a terminal state (Completed/Failed) — treat as not active
+                _logger.LogWarning(
+                    "Job row found but status is {Status} (not Queued/InProgress) for NoteId={NoteId}, ZipFileId={ZipFileId}",
+                    entity?.Status, noteId, zipFileId);
+                return null;
             }
             catch (Azure.RequestFailedException ex) when (ex.Status == 404)
             {
-                return false;
+                return null;
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error checking Jobs table for NoteId={NoteId}, ZipFileId={ZipFileId}", noteId, zipFileId);
-                return false;
-            }
+            // Transient errors are NOT caught — they will propagate and cause a queue retry
         }
 
         /// <summary>
-        /// Updates the job entity status using upsert (merge) so partial updates don't fail.
+        /// Updates the job entity status using conditional update with ETag to prevent
+        /// recreating a row that was deleted by a concurrent DELETE operation (§4.1.5).
         /// </summary>
         private async Task UpdateJobStatusAsync(string noteId, string zipFileId, string status, string statusDetails)
         {
+            var tableClient = _tableStorageHelper.Client;
+
             try
             {
-                var tableClient = _tableStorageHelper.Client;
-                var entity = new JobEntity
-                {
-                    PartitionKey = noteId,
-                    RowKey = zipFileId,
-                    Status = status,
-                    StatusDetails = statusDetails
-                };
-                await tableClient.UpsertEntityAsync(entity, Azure.Data.Tables.TableUpdateMode.Merge);
+                // Fetch current entity to get its ETag for conditional update
+                var response = await tableClient.GetEntityAsync<JobEntity>(noteId, zipFileId);
+                var entity = response.Value;
+                entity.Status = status;
+                entity.StatusDetails = statusDetails;
+
+                await tableClient.UpdateEntityAsync(entity, entity.ETag, Azure.Data.Tables.TableUpdateMode.Replace);
 
                 _logger.LogInformation(
                     "Updated job status to {Status} – NoteId={NoteId}, ZipFileId={ZipFileId}",
                     status, noteId, zipFileId);
+            }
+            catch (Azure.RequestFailedException ex) when (ex.Status == 404 || ex.Status == 412)
+            {
+                // 404 = row was deleted (by DELETE), 412 = ETag mismatch (concurrent modification)
+                _logger.LogWarning(
+                    "Could not update job to {Status}: row was deleted or modified concurrently – NoteId={NoteId}, ZipFileId={ZipFileId}",
+                    status, noteId, zipFileId);
+                throw;
             }
             catch (Exception ex)
             {
@@ -230,7 +248,8 @@ namespace HW4AzureFunctionsEx1
         }
 
         /// <summary>
-        /// Updates job status without throwing – used in catch blocks to avoid masking the original exception.
+        /// Updates job status without throwing – used in catch blocks and controlled failure paths
+        /// to avoid masking the original exception or aborting a graceful return.
         /// </summary>
         private async Task UpdateJobStatusSafeAsync(string noteId, string zipFileId, string status, string statusDetails)
         {

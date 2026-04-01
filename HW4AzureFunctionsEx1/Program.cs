@@ -11,6 +11,7 @@ var host = new HostBuilder()
         services.AddSingleton<BlobStorageHelper>();
         services.AddSingleton<TableStorageHelper>();
         services.AddScoped<AttachmentZipProcessor>();
+        services.AddScoped<AttachmentZipProcessorLegacy>();
     })
     .ConfigureLogging(logging =>
     {

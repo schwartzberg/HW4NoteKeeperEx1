@@ -94,12 +94,15 @@ namespace HW4NoteKeeperEx1.Controllers
                     return NoContent();
                 }
 
-                // Generate the target zip file name and enqueue the request
+                // Generate the target zip file name
                 string zipFileId = $"{Guid.NewGuid()}.zip";
-                await _storageService.EnqueueZipRequestAsync(noteId, zipFileId);
 
-                // §2.3.1 – Insert a Queued row into the Jobs table
+                // §2.3.1 – Insert a Queued row into the Jobs table BEFORE enqueuing
+                // so the Azure Function always finds the row when it starts processing
                 await _jobsTableService.InsertQueuedJobAsync(noteId, zipFileId);
+
+                // Enqueue the zip request
+                await _storageService.EnqueueZipRequestAsync(noteId, zipFileId);
 
                 _telemetryClient.TrackEvent("ZipRequested",
                     new Dictionary<string, string> { { "noteId", noteId }, { "zipFileId", zipFileId } });
@@ -361,10 +364,11 @@ namespace HW4NoteKeeperEx1.Controllers
                 }
                 catch (Exception ex)
                 {
-                    // §4.1.3 – Log error but continue with delete operations
+                    // Cannot verify InProgress state — conservatively return 409
                     _logger.LogError(ex,
-                        "DeleteNoteWithAllAssets: error checking InProgress jobs for note {NoteId} – continuing with delete",
+                        "DeleteNoteWithAllAssets: error checking InProgress jobs for note {NoteId} – returning 409 Conflict (cannot confirm safe to delete)",
                         noteId);
+                    return Conflict();
                 }
 
                 // §4.1 – Delete all job rows for this noteId from the Jobs table

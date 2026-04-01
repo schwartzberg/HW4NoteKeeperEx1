@@ -651,6 +651,61 @@ why are my environment variables changing?
 this is because there are two functions!!!! func-HW4 and func-HW4a and i am using func-HW4 (not with the a at the end -- this is my confusion)
 ```
 
+---
+
+## 39. GPT-5.4 Comprehensive Code Review
+
+**Context:** Before publishing the Ex1 solution, requested a full code review using GPT-5.4 model across 3 parallel review agents (Web API, Azure Functions, Infrastructure + Old Solution).
+
+**Prompt:**
+```text
+i would like to change the llm and have the solution completely reviewed. which llm should i choose for the review?
+please use model GPT-5.4 for the review
+it needs to look at all the previous prompts concerning the EX1 solution and any changes we made since to the old solution
+it needs to look at the requirements pdf file - all of it - to be sure.
+```
+
+**Review Findings (6 HIGH, 3 MEDIUM):**
+- **H1 (HIGH)**: Case mismatch — Web API stored raw-case noteId as PartitionKey, Function did `.ToLower()` → rows never found
+- **H2 (HIGH)**: `UpsertEntityAsync` could recreate deleted Jobs rows (race with DELETE cancel)
+- **H3 (HIGH)**: DELETE continued when `HasInProgressJobsAsync` threw — bypassed §4.1.4 safety
+- **H4 (HIGH)**: Singleton `AzureStorageInitializer` depended on Scoped `JobsTableService` → DI crash
+- **H5 (HIGH)**: `QueuedJobExistsAsync` returned false on ANY exception, silently dropping work
+- **H6 (HIGH)**: FALSE POSITIVE — legacy function on old queue is by design
+- **M1 (MEDIUM)**: Job existence check didn't verify Status was Queued/InProgress
+- **M2 (MEDIUM)**: POST enqueued message BEFORE inserting Queued row — function could find no row
+- **M3 (MEDIUM)**: Non-exception failure paths used throwing helper instead of safe version
+
+**Old solution verified:** All 6 bug fixes present, no EC1 leakage, builds clean.
+
+---
+
+## 40. Fix GPT-5.4 Review Findings (H1–H5, M1–M3)
+
+**Context:** Applied all fixes identified by the GPT-5.4 code review.
+
+**Prompt:**
+```text
+Yes fix H1-H6 in the new solution (i assume it is fixed already in the old solution right?) also after that check the tests that you said were passing -- are they still passing? If they are do also (after that) M1 to M3.
+Is H1 to H6 solved also in the old solution? Just asking.
+```
+
+**Resolution — All fixes applied to Ex1 solution only (H1-H6 are EC1-only issues):**
+
+| Issue | Fix | File |
+|-------|-----|------|
+| H1 | Added `NormalizeNoteId()` — all PartitionKey lookups lowercase | `JobsTableService.cs` |
+| H2 | Replaced `UpsertEntityAsync` with `GetEntity` + conditional `UpdateEntity` (ETag); 404/412 = cancelled | `AttachmentZipProcessor.cs` |
+| H3 | `HasInProgressJobsAsync` failure returns 409 Conflict (conservative) | `NoteKeeperZipAttachmentController.cs` |
+| H4 | Changed `AddScoped` → `AddSingleton` for `JobsTableService` | `Program.cs` |
+| H5 | New `GetActiveJobEntityAsync` only catches 404; transient errors propagate for queue retry | `AttachmentZipProcessor.cs` |
+| H6 | False positive — no action needed | — |
+| M1 | `GetActiveJobEntityAsync` verifies Status is Queued or InProgress | `AttachmentZipProcessor.cs` |
+| M2 | Insert Queued row BEFORE enqueue message | `NoteKeeperZipAttachmentController.cs` |
+| M3 | Non-exception failure paths use `UpdateJobStatusSafeAsync` | `AttachmentZipProcessor.cs` |
+
+**Build: 0 errors ✅ | Integration Tests: 7/7 passed ✅**
+
 **Context:**
 User thought environment variables were being overwritten by VS Publish. Investigation revealed two separate function apps exist: `func-HW4` (in use, properly configured) and `func-HW4a` (empty, no functions deployed).
 

@@ -162,7 +162,7 @@ namespace HW4NoteKeeperEx1
             RegisterQueueServiceClient(builder, storageAccountSettings);
             builder.Services.AddScoped<HW4NoteKeeperEx1.Services.AzureStorageService>();
             RegisterTableClient(builder, storageAccountSettings);
-            builder.Services.AddScoped<HW4NoteKeeperEx1.Services.JobsTableService>();
+            builder.Services.AddSingleton<HW4NoteKeeperEx1.Services.JobsTableService>();
 
             // Register AzureStorageInitializer as singleton for seeding operations
             builder.Services.AddSingleton<HW4NoteKeeperEx1.Data.IAzureStorageInitializer, HW4NoteKeeperEx1.Data.AzureStorageInitializer>();
