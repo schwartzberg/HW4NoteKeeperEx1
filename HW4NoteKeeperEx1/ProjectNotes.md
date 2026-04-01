@@ -1003,3 +1003,33 @@ otes/{noteId}/attachmentzipfiles/jobs.
 
 ### Moq / Unit Testing Note
 AzureStorageService methods GetBlobCountAsync, EnqueueZipRequestAsync, EnqueueLegacyZipRequestAsync and JobsTableService.InsertQueuedJobAsync are marked irtual so Moq can mock them in unit tests without requiring interface extraction. 11 unit tests in NoteKeeperZipAttachmentControllerTests cover both controllers and all queue-routing scenarios.
+
+---
+
+## 4.4 Jobs Table Design Decision: Single Row Update (Not Insert-Per-Status)
+
+### Design Decision
+The Azure Function (`AttachmentZipProcessor`) **updates the same Jobs table row in-place** as the job progresses through its lifecycle, rather than inserting a new row for each status change.
+
+### Row Lifecycle
+1. **Web API POST** (`InsertQueuedJobAsync`) — Inserts a single row with `Status = "Queued"`
+   - PartitionKey = noteId (lowercase), RowKey = zipFileId
+2. **Azure Function** — Updates that same row:
+   - `Status = "InProgress"` (before zip creation begins)
+   - `Status = "Completed"` (after successful zip upload) or `Status = "Failed"` (on error)
+
+### Why Update Instead of Insert New Rows
+- **Simpler querying**: GET job status returns a single row per zipFileId — no need to query for the "latest" status
+- **Cleaner storage**: One row per job, not 3+ rows per job
+- **ETag-based concurrency**: The Function uses conditional updates (`UpdateEntityAsync` with ETag) to detect if a DELETE operation cancelled the job between status transitions (§4.1.5)
+- **Consistent with the GET endpoints**: `GetJobStatus` and `GetAllJobStatuses` each return one entry per zipFileId, which maps directly to one row in the table
+
+### What the Final Row Looks Like
+After successful processing, the Jobs table row contains:
+| Field | Example Value |
+|-------|---------------|
+| PartitionKey | `6d836d96-5eca-49ef-ada9-f1f6060961d3` |
+| RowKey | `b380ac58-2105-48aa-94d2-db0b83b12dc6.zip` |
+| Status | `Completed` |
+| StatusDetails | `Completed: zipFileId: b380ac58-... containerId: 6d836d96-...-zip` |
+| Timestamp | (auto-updated by Azure Table Storage on each write) |

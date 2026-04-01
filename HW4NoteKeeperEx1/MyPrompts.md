@@ -1132,3 +1132,26 @@ see picture the 3 methods of NoteKeeperZipAttachmentControllerEx1 should NOT be 
 
 **Context:**
 After deployment, the old app service Swagger showed the `NoteKeeperZipAttachmentControllerEx1` endpoints. Investigation confirmed the old solution's source code has NO Ex1 files — the Ex1 build had been accidentally published to the old app service. Resolution: re-publish the correct old solution to the old app service and the Ex1 solution to the Ex1 app service.
+
+## 47. Jobs Table Design Decision — Single Row Update Pattern
+
+**Prompt:**
+```
+YOU CAN UPDATE THE projetnotes.md file the design decision we took for extra credit 1 that the azure function updates the noteid row in the Jobs storage table and does not insert a new row for every noteid status change and update the MyPrompts.md file
+```
+
+**Context:**
+After debugging the "empty Jobs table" issue, it turned out the Jobs table WAS being populated correctly — the user was using the wrong view in Azure Storage Browser. The rows showed Status=Completed, confirming the full pipeline works:
+1. Web API `InsertQueuedJobAsync` inserts a row with Status=Queued
+2. Azure Function `AttachmentZipProcessor` updates that same row to InProgress, then Completed
+
+**Design Decision Documented:**
+The Azure Function updates the existing Jobs table row in-place (Queued → InProgress → Completed/Failed) rather than inserting a new row for each status change. This was documented in ProjectNotes.md §4.4. Benefits: simpler GET queries, cleaner storage, ETag-based concurrency for cancellation detection.
+
+**Files Updated:**
+- `ProjectNotes.md` — Added §4.4 "Jobs Table Design Decision: Single Row Update (Not Insert-Per-Status)"
+- `MyPrompts.md` — Added prompt #47
+
+**New Test Files Created:**
+- `NoteKeeperZipAttachmentControllerEx1Tests.cs` — 18 unit tests for the Ex1 controller (POST, GET single job, GET all jobs)
+- `NoteKeeperZipAttachmentControllerEx1E2ETests.cs` — 13 E2E tests hitting live Azure, including the key test `PostEx1_InsertsQueuedRow_InJobsTable` that reads the Jobs table directly after POST
